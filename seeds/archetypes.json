@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "id": "Forager_0",
+      "llmModel": "mock",
+      "temperature": 0.1,
+      "tools": [
+        "retrieval",
+        "browser"
+      ],
+      "coopThreshold": 0.3
+    },
+    {
+      "id": "Negotiator_0",
+      "llmModel": "mock",
+      "temperature": 0.3,
+      "tools": [
+        "retrieval",
+        "stringKit",
+        "browser"
+      ],
+      "coopThreshold": 0.9
+    },
+    {
+      "id": "Sprinter_0",
+      "llmModel": "mock",
+      "temperature": 0.5,
+      "tools": [
+        "browser"
+      ],
+      "coopThreshold": 0.3
+    },
+    {
+      "id": "Scholar_0",
+      "llmModel": "mock",
+      "temperature": 0.1,
+      "tools": [
+        "retrieval",
+        "stringKit",
+        "browser",
+        "calc"
+      ],
+      "coopThreshold": 0.6
+    },
+    {
+      "id": "Cheapskate_0",
+      "llmModel": "mock",
+      "temperature": 0.1,
+      "tools": [
+        "stringKit"
+      ],
+      "coopThreshold": 0.3
+    },
+    {
+      "id": "Socialite_0",
+      "llmModel": "mock",
+      "temperature": 0.3,
+      "tools": [
+        "browser",
+        "stringKit"
+      ],
+      "coopThreshold": 0.9
+    }
+  ]
+}

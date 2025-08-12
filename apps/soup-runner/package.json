@@ -1,0 +1,30 @@
+{
+  "name": "@soup/soup-runner",
+  "version": "0.2.0",
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "lint": "echo 'ok'",
+    "test": "echo 'no tests'",
+    "prisma:generate": "prisma generate --schema=./src/prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --name init --schema=./src/prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@soup/common": "0.2.0",
+    "@soup/agents": "0.2.0",
+    "bullmq": "^5.6.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.27.2",
+    "ioredis": "^5.4.1",
+    "@prisma/client": "^5.17.0",
+    "fs-extra": "^11.2.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.0",
+    "prisma": "^5.17.0"
+  }
+}

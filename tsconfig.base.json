@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@soup/common": [
+        "packages/common/src/index.ts"
+      ],
+      "@soup/agents": [
+        "packages/agents/src/index.ts"
+      ]
+    }
+  }
+}

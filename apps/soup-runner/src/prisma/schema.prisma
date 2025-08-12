@@ -1,0 +1,7 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "sqlite"; url = env("DATABASE_URL") }
+model Blueprint { id String @id @default(cuid()) version Int llmModel String temperature Float tools String coopThreshold Float minBalance Int mutationRate Float maxOffspring Int createdAt DateTime @default(now()) }
+model AgentState { id String @id @default(cuid()) blueprintId String balance Int reputation Float attempts Int wins Int meanTtcSec Int alive Boolean @default(true) lastBeat DateTime @default(now()) }
+model Job { id String @id @default(cuid()) category String payload String payout Int deadlineS Int createdAt DateTime @default(now()) }
+model Ledger { id String @id @default(cuid()) agentId String delta Int reason String ts DateTime @default(now()) }
+model Edge { id String @id @default(cuid()) fromId String toId String topic String ts DateTime @default(now()) }
