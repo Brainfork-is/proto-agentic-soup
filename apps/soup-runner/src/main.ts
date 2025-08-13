@@ -3,13 +3,16 @@ import IORedis from 'ioredis'; import { config } from 'dotenv'; import { PrismaC
 import { nowIso, gini, topKShare } from '@soup/common'; import fs from 'fs-extra'; import path from 'path';
 import { SimpleAgent } from '@soup/agents';
 config();
+// Provide sane defaults so dev bootstrap doesn't crash
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = 'file:./dev.db';
+}
+const BOOTSTRAP = process.env.SOUP_BOOTSTRAP === '1' || process.env.BOOTSTRAP === '1';
 
 const app=Fastify(); const redis=new IORedis(process.env.REDIS_URL||'redis://localhost:6379'); const prisma=new PrismaClient();
 const JOBS_PER_MIN=Number(process.env.JOBS_PER_MIN||10), EPOCH_MINUTES=Number(process.env.EPOCH_MINUTES||120);
 const FAIL_PENALTY=Number(process.env.FAIL_PENALTY||3), STEP_COST=Number(process.env.BROWSER_STEP_COST||1);
 const RUN_DIR=path.join(process.cwd(),'runs',String(Date.now())); const METRICS_DIR=path.join(RUN_DIR,'metrics'); fs.ensureDirSync(METRICS_DIR);
-
-app.get('/healthz',async()=>({ok:true,time:new Date().toISOString()}));
 app.get('/leaderboard',async()=>{ const s=await prisma.agentState.findMany();
  const rows=s.map((x: any)=>({agentId:x.id,balance:x.balance,wins:x.wins,attempts:x.attempts})).sort((a: any,b: any)=>b.balance-a.balance).slice(0,20); return {rows}; });
 
@@ -50,7 +53,7 @@ async function startAgentWorkers(){ const agents=await prisma.agentState.findMan
  return {ok,artifact:res.artifact}; },{connection:redis,concurrency:1}); agentWorkers.push(worker);} }
 
 async function epochTick(){ const states=await prisma.agentState.findMany({where:{alive:true}});
- const balances=states.map(s=>s.balance); const g=gini(balances), share5=topKShare(balances,5); const ts=new Date().toISOString();
+ const balances=states.map((s: any)=>s.balance); const g=gini(balances), share5=topKShare(balances,5); const ts=new Date().toISOString();
  fs.appendFileSync(path.join(METRICS_DIR,'inequality.csv'),`${ts},${g.toFixed(4)},${share5.toFixed(4)}\n`);
  // reproduce
  const bps=await prisma.blueprint.findMany(); for(const s of states){ const bp=bps.find((b: any)=>b.id===s.blueprintId)!;
@@ -63,11 +66,19 @@ async function epochTick(){ const states=await prisma.agentState.findMany({where
    await prisma.agentState.update({where:{id:s.id},data:{balance:{decrement:5}}}); }}
  // cull
  const refreshed=await prisma.agentState.findMany({where:{alive:true}}); const sorted=[...refreshed].sort((a: any,b: any)=>a.balance-b.balance);
- const cut=Math.max(1,Math.floor(sorted.length*0.2)); const toCull=new Set(sorted.slice(0,cut).map(s=>s.id)); for(const s of refreshed) if(s.balance<0) toCull.add(s.id);
+ const cut=Math.max(1,Math.floor(sorted.length*0.2)); const toCull=new Set(sorted.slice(0,cut).map((s: any)=>s.id)); for(const s of refreshed) if(s.balance<0) toCull.add(s.id);
  for(const id of Array.from(toCull)) await prisma.agentState.update({where:{id},data:{alive:false}}); }
 
-async function main(){ await prisma.$connect(); fs.ensureDirSync(METRICS_DIR); fs.writeFileSync(path.join(METRICS_DIR,'inequality.csv'),'ts,gini,top5share\n');
- await seedIfEmpty(); setInterval(generateJobs,60_000); await generateJobs(); await startAgentWorkers();
- setInterval(()=>epochTick().catch(console.error),EPOCH_MINUTES*60_000);
- app.listen({port:Number(process.env.PORT||3000),host:'0.0.0.0'}).then(()=>console.log(`[soup-runner] ${process.env.PORT||3000}`)); }
+async function main(){
+  app.get('/healthz', async()=>({ ok: true, mode: BOOTSTRAP ? 'bootstrap' : 'full', time: new Date().toISOString() }));
+  if (BOOTSTRAP) {
+    // Minimal server only; skip external services for M-1 dev
+    await app.listen({ port: Number(process.env.PORT||3000), host: '0.0.0.0' });
+    console.log(`[soup-runner] ${process.env.PORT||3000} (bootstrap)`);
+    return;
+  }
+  await prisma.$connect(); fs.ensureDirSync(METRICS_DIR); fs.writeFileSync(path.join(METRICS_DIR,'inequality.csv'),'ts,gini,top5share\n');
+  await seedIfEmpty(); setInterval(generateJobs,60_000); await generateJobs(); await startAgentWorkers();
+  setInterval(()=>epochTick().catch(console.error),EPOCH_MINUTES*60_000);
+  app.listen({port:Number(process.env.PORT||3000),host:'0.0.0.0'}).then(()=>console.log(`[soup-runner] ${process.env.PORT||3000}`)); }
 main().catch(e=>{console.error(e);process.exit(1);});
