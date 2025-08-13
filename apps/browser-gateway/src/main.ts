@@ -64,5 +64,5 @@ app.post('/run', async (req, reply) => {
 
 const port = Number(process.env.PORT || 3100);
 app
-  .listen(port, '0.0.0.0')
+  .listen({ port, host: '0.0.0.0' })
   .then(() => console.log(`[browser-gateway] ${port}`));

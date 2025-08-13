@@ -2,7 +2,8 @@ import Fastify from 'fastify';
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { config } from 'dotenv';
-import { PrismaClient } from '@prisma/client';
+// Prisma is imported dynamically to avoid requiring a generated client in bootstrap mode
+// import { PrismaClient } from '@prisma/client';
 import { nowIso, gini, topKShare } from '@soup/common';
 import fs from 'fs-extra';
 import path from 'path';
@@ -17,8 +18,8 @@ if (!process.env.DATABASE_URL) {
 const BOOTSTRAP = process.env.SOUP_BOOTSTRAP === '1' || process.env.BOOTSTRAP === '1';
 
 const app = Fastify();
-const redis = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379');
-const prisma = new PrismaClient();
+let redis: any;
+let prisma: any;
 
 const JOBS_PER_MIN = Number(process.env.JOBS_PER_MIN || 10);
 const EPOCH_MINUTES = Number(process.env.EPOCH_MINUTES || 120);
@@ -43,7 +44,7 @@ app.get('/leaderboard', async () => {
   return { rows };
 });
 
-const jobQueue = new Queue('jobs', { connection: redis });
+let jobQueue: any;
 
 async function seedIfEmpty() {
   const agents = await prisma.agentState.findMany();
@@ -254,10 +255,14 @@ async function main() {
     console.log(`[soup-runner] ${process.env.PORT || 3000} (bootstrap)`);
     return;
   }
-
+  // Initialize Redis and Prisma only in full mode
+  redis = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379');
+  const { PrismaClient } = await import('@prisma/client');
+  prisma = new PrismaClient();
   await prisma.$connect();
   fs.ensureDirSync(METRICS_DIR);
   fs.writeFileSync(path.join(METRICS_DIR, 'inequality.csv'), 'ts,gini,top5share\n');
+  jobQueue = new Queue('jobs', { connection: redis });
   await seedIfEmpty();
   setInterval(generateJobs, 60_000);
   await generateJobs();
