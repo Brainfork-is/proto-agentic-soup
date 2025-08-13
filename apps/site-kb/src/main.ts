@@ -13,5 +13,5 @@ app.get('/healthz', async () => ({ ok: true }));
 
 const port = Number(process.env.PORT || 3200);
 app
-  .listen(port, '0.0.0.0')
+  .listen({ port, host: '0.0.0.0' })
   .then(() => console.log(`[site-kb] ${port}`));
