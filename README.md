@@ -11,7 +11,7 @@ Single-machine MVP with Redis, SQLite, Playwright, and agent workers. See quicks
 - Dev run: `pnpm dev`
 
 Notes:
-- Node 20.x LTS is recommended. Newer majors (e.g., Node 23) may emit deprecation warnings and have ecosystem incompatibilities.
+- Node 20.x LTS is pinned for this repo. Use `nvm use` (reads `.nvmrc`), or Volta (auto-picks from `package.json#volta`). Newer majors (e.g., Node 23) may emit deprecation warnings and have ecosystem incompatibilities.
 - To run the full runner (not bootstrap), start Redis (`cd infra && docker compose up -d`) and generate Prisma client:
   - `pnpm --filter @soup/soup-runner prisma:generate`
   - then run `pnpm --filter @soup/soup-runner dev` after unsetting `SOUP_BOOTSTRAP` or use `start` from dist.

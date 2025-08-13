@@ -3,7 +3,15 @@
   "private": true,
   "version": "0.2.0",
   "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "volta": {
+    "node": "20.15.1",
+    "pnpm": "9.0.0"
+  },
   "scripts": {
+    "preinstall": "corepack enable || true && corepack prepare pnpm@9.0.0 --activate || true",
     "build": "pnpm -r build",
     "dev": "concurrently -n soup,browser,site \"pnpm --filter @soup/soup-runner dev\" \"pnpm --filter @soup/browser-gateway dev\" \"pnpm --filter @soup/site-kb dev\"",
     "start": "concurrently -n soup,browser,site \"pnpm --filter @soup/soup-runner start\" \"pnpm --filter @soup/browser-gateway start\" \"pnpm --filter @soup/site-kb start\"",
