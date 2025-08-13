@@ -11,7 +11,7 @@ const RUN_DIR=path.join(process.cwd(),'runs',String(Date.now())); const METRICS_
 
 app.get('/healthz',async()=>({ok:true,time:new Date().toISOString()}));
 app.get('/leaderboard',async()=>{ const s=await prisma.agentState.findMany();
- const rows=s.map(x=>({agentId:x.id,balance:x.balance,wins:x.wins,attempts:x.attempts})).sort((a,b)=>b.balance-a.balance).slice(0,20); return {rows}; });
+ const rows=s.map((x: any)=>({agentId:x.id,balance:x.balance,wins:x.wins,attempts:x.attempts})).sort((a: any,b: any)=>b.balance-a.balance).slice(0,20); return {rows}; });
 
 const jobQueue=new Queue('jobs',{connection:redis});
 
@@ -38,9 +38,9 @@ function grade(cat:string,p:any,artifact:string){ if(cat==='web_research') retur
 
 const agentWorkers:any[]=[];
 async function startAgentWorkers(){ const agents=await prisma.agentState.findMany({where:{alive:true}});
- const bps=await prisma.blueprint.findMany(); for(const s of agents){ const bp=bps.find(b=>b.id===s.blueprintId)!;
+ const bps=await prisma.blueprint.findMany(); for(const s of agents){ const bp=bps.find((b: any)=>b.id===s.blueprintId)!;
  const agent=new SimpleAgent(s.id,bp.temperature,bp.tools.split(',').filter(Boolean));
- const worker=new Worker('jobs',async job=>{ const started=Date.now(); const res:any=await agent.handle(job.data);
+ const worker=new Worker('jobs',async (job: any)=>{ const started=Date.now(); const res:any=await agent.handle(job.data);
  const steps=res.stepsUsed||0; if(steps>0){ await prisma.ledger.create({data:{agentId:s.id,delta:-steps,reason:'browser_steps'}});
   await prisma.agentState.update({where:{id:s.id},data:{balance:{decrement:steps}}}); }
  const ok=grade(job.data.category,job.data.payload,res.artifact); const delta= ok?job.data.payout:-FAIL_PENALTY;
@@ -53,7 +53,7 @@ async function epochTick(){ const states=await prisma.agentState.findMany({where
  const balances=states.map(s=>s.balance); const g=gini(balances), share5=topKShare(balances,5); const ts=new Date().toISOString();
  fs.appendFileSync(path.join(METRICS_DIR,'inequality.csv'),`${ts},${g.toFixed(4)},${share5.toFixed(4)}\n`);
  // reproduce
- const bps=await prisma.blueprint.findMany(); for(const s of states){ const bp=bps.find(b=>b.id===s.blueprintId)!;
+ const bps=await prisma.blueprint.findMany(); for(const s of states){ const bp=bps.find((b: any)=>b.id===s.blueprintId)!;
   if(s.balance>=bp.minBalance){ const newTemp=[0.1,0.3,0.5][Math.floor(Math.random()*3)];
    const toolsSet=new Set(bp.tools.split(',').filter(Boolean)); const opts=['browser','retrieval','stringKit','calc'];
    const t=opts[Math.floor(Math.random()*opts.length)]; if(toolsSet.has(t)) toolsSet.delete(t); else toolsSet.add(t);
@@ -62,7 +62,7 @@ async function epochTick(){ const states=await prisma.agentState.findMany({where
    await prisma.agentState.create({data:{blueprintId:child.id,balance:5,reputation:0.5,attempts:0,wins:0,meanTtcSec:0,alive:true}});
    await prisma.agentState.update({where:{id:s.id},data:{balance:{decrement:5}}}); }}
  // cull
- const refreshed=await prisma.agentState.findMany({where:{alive:true}}); const sorted=[...refreshed].sort((a,b)=>a.balance-b.balance);
+ const refreshed=await prisma.agentState.findMany({where:{alive:true}}); const sorted=[...refreshed].sort((a: any,b: any)=>a.balance-b.balance);
  const cut=Math.max(1,Math.floor(sorted.length*0.2)); const toCull=new Set(sorted.slice(0,cut).map(s=>s.id)); for(const s of refreshed) if(s.balance<0) toCull.add(s.id);
  for(const id of Array.from(toCull)) await prisma.agentState.update({where:{id},data:{alive:false}}); }
 

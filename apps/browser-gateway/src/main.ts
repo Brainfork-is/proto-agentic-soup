@@ -1,6 +1,6 @@
-import Fastify from 'fastify'; import cors from 'fastify-cors'; import { chromium, Browser } from 'playwright';
+import Fastify from 'fastify'; import cors from '@fastify/cors'; import { chromium, Browser } from 'playwright';
 const app=Fastify(); app.register(cors,{origin:'*'});
-const ALLOWED=(process.env.ALLOWED_HOSTS||'localhost,127.0.0.1').split(',').map(s=>s.trim());
+const ALLOWED=(process.env.ALLOWED_HOSTS||'localhost,127.0.0.1').split(',').map((s: string)=>s.trim());
 let browser:Browser|null=null;
 app.get('/healthz',async()=>({ok:true}));
 app.post('/run',async(req,reply)=>{ const b:any=req.body||{}; const url:string=b.url; const steps:any[]=b.steps||[];
