@@ -21,9 +21,15 @@
 
 ## Coding Style & Naming Conventions
 - Language: TypeScript targeting Node; commonjs packaging. Shared config in `tsconfig.base.json`.
-- Indentation: 2 spaces; semicolons required; single quotes in TS.
+- Formatting: Prettier is required. 2 spaces, semicolons, single quotes, print width 100. Run `pnpm format`.
+- Linting: ESLint with `@typescript-eslint` and `plugin:prettier/recommended`. Run `pnpm lint` or `pnpm lint:fix`.
 - Names: `camelCase` for functions/vars, `PascalCase` for classes/types, `kebab-case` for file and package names.
 - Exports: prefer named exports from `index.ts` in libraries; app entry at `src/main.ts`.
+
+### Pre-PR checklist (agents should follow)
+- `pnpm format:check` passes (no unformatted code)
+- `pnpm lint` passes (or `pnpm lint:fix` applied)
+- `pnpm -r build` passes across the workspace
 
 ## Testing Guidelines
 - Current state: no automated tests. Add unit tests per package/app.
