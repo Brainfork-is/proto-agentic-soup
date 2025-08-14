@@ -77,6 +77,7 @@ Notes:
 
 3) Full run (agents + jobs)
 - Start Redis (6379): `pnpm redis:up` (or `cd infra && docker compose up -d`)
+  - Ensure Docker is running (Docker Desktop/Colima/Podman machine). If Docker isn’t available, try `pnpm redis:run` (uses `docker run`) or install Redis locally (e.g., `brew install redis && brew services start redis`).
 - `pnpm --filter @soup/soup-runner prisma:generate` (generate Prisma client for SQLite)
 - `pnpm --filter @soup/soup-runner dev` (ensure `SOUP_BOOTSTRAP` is not set)
 

@@ -45,7 +45,7 @@ async function seedIfEmpty() {
   if (agents.length > 0) return;
 
   const seeds = JSON.parse(
-    fs.readFileSync(path.join(process.cwd(), 'seeds', 'archetypes.json'), 'utf8')
+    fs.readFileSync(path.join(__dirname, '../../../seeds', 'archetypes.json'), 'utf8')
   );
 
   for (const a of seeds.agents) {
@@ -250,7 +250,9 @@ async function main() {
     return;
   }
   // Initialize Redis and Prisma only in full mode
-  redis = new IORedis(cfg.REDIS_URL);
+  redis = new IORedis(cfg.REDIS_URL, {
+    maxRetriesPerRequest: null
+  });
   const { PrismaClient } = await import('@prisma/client');
   prisma = new PrismaClient();
   await prisma.$connect();

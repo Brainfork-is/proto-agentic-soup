@@ -21,7 +21,9 @@
     "format:check": "prettier --check .",
     "test": "pnpm -r test",
     "redis:up": "cd infra && docker compose up -d",
-    "redis:down": "cd infra && docker compose down"
+    "redis:down": "cd infra && docker compose down",
+    "redis:run": "docker run -d --name soup-redis -p 6379:6379 --health-cmd 'redis-cli ping || exit 1' --health-interval 5s --health-timeout 3s --health-retries 10 redis:7-alpine redis-server --appendonly no",
+    "redis:stop": "docker rm -f soup-redis || true",
     "prisma:generate": "pnpm --filter @soup/soup-runner prisma:generate",
     "prisma:migrate": "pnpm --filter @soup/soup-runner prisma:migrate",
     "build-agent": "pnpm --filter @soup/build-agent start",
