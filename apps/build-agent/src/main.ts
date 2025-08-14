@@ -129,8 +129,7 @@ async function main() {
       describe: 'Output directory for prompts',
     })
     .strict()
-    .help()
-    .argv;
+    .help().argv;
 
   const concept = readMarkdown(conceptPath);
   const spec = readMarkdown(specPath);

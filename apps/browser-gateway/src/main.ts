@@ -63,6 +63,4 @@ app.post('/run', async (req, reply) => {
 });
 
 const port = cfg.BROWSER_GATEWAY_PORT;
-app
-  .listen({ port, host: '0.0.0.0' })
-  .then(() => console.log(`[browser-gateway] ${port}`));
+app.listen({ port, host: '0.0.0.0' }).then(() => console.log(`[browser-gateway] ${port}`));
