@@ -1,6 +1,11 @@
-version: "3.8"
 services:
   redis:
     image: redis:7-alpine
     ports: [ "6379:6379" ]
     command: ["redis-server","--appendonly","no"]
+    healthcheck:
+      test: ["CMD-SHELL","redis-cli ping || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped

@@ -18,7 +18,10 @@ const browserSchema = zod_1.z.object({
         .string()
         .optional()
         .default('localhost,127.0.0.1')
-        .transform((s) => s.split(',').map((x) => x.trim()).filter(Boolean)),
+        .transform((s) => s
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean)),
 });
 const siteSchema = zod_1.z.object({
     SITE_KB_PORT: zod_1.z.coerce.number().optional().default(3200),
