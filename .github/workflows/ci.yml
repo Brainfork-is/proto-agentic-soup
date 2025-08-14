@@ -73,3 +73,28 @@ jobs:
           for i in {1..20}; do
             if redis-cli -h 127.0.0.1 -p 6379 ping | grep -q PONG; then
               echo "Redis healthy"; exit 0; fi; echo "waiting for redis..."; sleep 1; done; exit 1
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run tests
+        run: |
+          # Start services in background for integration tests
+          BROWSER_GATEWAY_PORT=3101 pnpm --filter @soup/browser-gateway start &
+          BROWSER_GATEWAY_PID=$!
+          pnpm --filter @soup/site-kb start &
+          SITE_KB_PID=$!
+          
+          # Wait for services to start
+          echo "Waiting for services to start..."
+          sleep 10
+          
+          # Check if services are ready
+          timeout 30 bash -c 'until curl -f http://localhost:3101/healthz; do sleep 2; done'
+          timeout 30 bash -c 'until curl -f http://localhost:3200/healthz; do sleep 2; done'
+          
+          # Run tests
+          pnpm --filter @soup/browser-gateway test
+          
+          # Clean up background processes
+          kill $BROWSER_GATEWAY_PID $SITE_KB_PID || true
