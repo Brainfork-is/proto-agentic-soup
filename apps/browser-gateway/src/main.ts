@@ -1,13 +1,13 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { chromium, Browser } from 'playwright';
+import { loadBrowserConfig } from '@soup/common';
 
+const cfg = loadBrowserConfig();
 const app = Fastify();
 app.register(cors, { origin: '*' });
 
-const ALLOWED = (process.env.ALLOWED_HOSTS || 'localhost,127.0.0.1')
-  .split(',')
-  .map((s: string) => s.trim());
+const ALLOWED = cfg.ALLOWED_HOSTS as string[];
 
 let browser: Browser | null = null;
 
@@ -62,7 +62,7 @@ app.post('/run', async (req, reply) => {
   }
 });
 
-const port = Number(process.env.PORT || 3100);
+const port = cfg.BROWSER_GATEWAY_PORT;
 app
   .listen({ port, host: '0.0.0.0' })
   .then(() => console.log(`[browser-gateway] ${port}`));
