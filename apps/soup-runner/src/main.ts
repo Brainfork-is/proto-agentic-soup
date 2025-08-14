@@ -237,11 +237,36 @@ async function epochTick() {
 }
 
 async function main() {
-  app.get('/healthz', async () => ({
-    ok: true,
-    mode: BOOTSTRAP ? 'bootstrap' : 'full',
-    time: new Date().toISOString(),
-  }));
+  app.get('/healthz', async () => {
+    const health: any = {
+      ok: true,
+      mode: BOOTSTRAP ? 'bootstrap' : 'full',
+      time: new Date().toISOString(),
+      services: {}
+    };
+
+    if (!BOOTSTRAP) {
+      // Check Redis connection
+      try {
+        await redis.ping();
+        health.services.redis = { status: 'healthy', url: cfg.REDIS_URL };
+      } catch (error) {
+        health.ok = false;
+        health.services.redis = { status: 'unhealthy', error: error.message };
+      }
+
+      // Check Prisma/SQLite connection
+      try {
+        await prisma.$queryRaw`SELECT 1 as test`;
+        health.services.database = { status: 'healthy', type: 'sqlite' };
+      } catch (error) {
+        health.ok = false;
+        health.services.database = { status: 'unhealthy', error: error.message };
+      }
+    }
+
+    return health;
+  });
 
   if (BOOTSTRAP) {
     // Minimal server only; skip external services for M-1 dev
