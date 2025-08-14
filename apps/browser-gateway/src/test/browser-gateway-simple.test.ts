@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 
 // Simple integration test that tests against running services
 describe('Browser Gateway Integration', () => {
