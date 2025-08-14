@@ -6,7 +6,7 @@ import { loadSiteConfig } from '@soup/common';
 const app = Fastify();
 
 app.register(fastifyStatic, {
-  root: join(__dirname, '../public'),
+  root: join(__dirname, 'public'),
   prefix: '/',
 });
 

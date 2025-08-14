@@ -16,9 +16,9 @@
 
 # Epic N — Browser Substrate
 
-- [ ] **[N-1] Browser Gateway skeleton (Fastify + Playwright)** — M **Desc:** /healthz, /run endpoint with steps: click, type, wait, extract. **AC:** Example POST runs steps on site-kb; returns lastText, contentLength.
-- [ ] **[N-2] Host allow‑list & errors** — S **Desc:** Validate URL host in ALLOWED_HOSTS; return 400 if disallowed; 500 on browser fault. **AC:** Requests to non‑allowed host rejected; retries configurable.
-- [ ] **[N-3] Step metering** — S **Desc:** Count steps per /run; return stepsUsed. **AC:** Response includes integer count; zero if no steps.
+- [x] **[N-1] Browser Gateway skeleton (Fastify + Playwright)** — M **Desc:** /healthz, /run endpoint with steps: click, type, wait, extract. **AC:** Example POST runs steps on site-kb; returns lastText, contentLength.
+- [x] **[N-2] Host allow‑list & errors** — S **Desc:** Validate URL host in ALLOWED_HOSTS; return 400 if disallowed; 500 on browser fault. **AC:** Requests to non‑allowed host rejected; retries configurable.
+- [x] **[N-3] Step metering** — S **Desc:** Count steps per /run; return stepsUsed. **AC:** Response includes integer count; zero if no steps.
 - [ ] **[N-4] Local KB site** — S **Desc:** Serve static pages: index, guides/rag.html, docs/vector-db.html, policies/coop.html. **AC:** Pages reachable; deterministic text in anchors for extraction.
 - [ ] **[N-5] Synthetic search page (optional)** — M **Desc:** Simple search form listing page links; supports typing + click flows. **AC:** Agents can type query, click result, extract text.
 
