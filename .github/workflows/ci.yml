@@ -59,7 +59,7 @@ jobs:
         run: |
           pnpm --filter @soup/common build
           pnpm --filter @soup/agents build
-          
+
       - name: Build apps
         run: |
           pnpm --filter @soup/browser-gateway build
