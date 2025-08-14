@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.pnpm-store/
+coverage/
+runs/
+*.tsbuildinfo
+apps/**/public/
+apps/**/dist/
+packages/**/dist/
+infra/
+pnpm-lock.yaml
