@@ -44,3 +44,14 @@
 ## Security & Configuration Tips
 - Environment: load with `dotenv`. Example `.env` for runner: `DATABASE_URL="file:./dev.db"` and `REDIS_URL="redis://localhost:6379"`.
 - Avoid committing secrets. Add new env keys to README or `docs/` and reference where consumed.
+
+## Agent Runtime (LangChain.js + LangGraph.js)
+
+- We are standardizing on LangChain.js Tools and LangGraph.js graphs for agent logic.
+- The existing `SimpleAgent` is a placeholder heuristic to enable end‑to‑end runs without LLM keys; it will be replaced by a small LangGraph (plan → act → reflect → learn).
+- Tools to implement as LangChain Tools:
+  - `browser`: wrapper around `browser-gateway` `/run` HTTP API
+  - `retrieval-local`: search over local KB corpus
+  - `stringKit`: summarize/extract/classify helpers
+  - `calc`: arithmetic evaluator
+- Planner should be LLM‑backed when keys are present, with a deterministic/mock fallback.

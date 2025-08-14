@@ -121,6 +121,9 @@ while (alive) {
 
 **Planner options:** start with **mock heuristic**; enable LLM via `LLM_PROVIDER=openai` env when credits available.
 
+Implementation notes:
+- The agent runtime will adopt LangGraph.js + LangChain.js to model the planner→actor→reflect→learn flow as a small graph. The current `SimpleAgent` heuristic is a placeholder to allow end‑to‑end runs without LLM keys. Tools (browser, retrieval, stringKit, calc) will be exposed as LangChain Tools; the browser tool wraps the `browser-gateway` `/run` API.
+
 ---
 
 ## 6) Communication (A2A‑lite → path to standards)
@@ -231,4 +234,3 @@ while (alive) {
 * Running stack on one machine (Redis, Playwright, three Node apps).
 * 24h experiment logs + CSVs; dashboard screenshots of inequality & network skew.
 * Seed archetypes JSON; runbook with ablations & shocks.
-
