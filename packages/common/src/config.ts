@@ -23,6 +23,7 @@ const browserSchema = z.object({
         .filter(Boolean)
     ),
   MCP_KNOWLEDGE_SERVER: z.string().optional().default(''),
+  MCP_BEARER_TOKEN: z.string().optional().default(''),
 });
 
 const siteSchema = z.object({
@@ -42,6 +43,8 @@ const runnerSchema = z.object({
     .optional()
     .default('0')
     .transform((v) => v === '1'),
+  MCP_KNOWLEDGE_SERVER: z.string().optional().default(''),
+  MCP_BEARER_TOKEN: z.string().optional().default(''),
 });
 
 export type CommonConfig = z.infer<typeof commonSchema>;
