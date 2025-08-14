@@ -15,12 +15,12 @@ describe('Browser Gateway', () => {
     // Start mock site server
     mockSiteApp = Fastify();
     await mockSiteApp.register(cors, { origin: '*' });
-    
+
     mockSiteApp.get('/healthz', async () => ({ ok: true }));
     mockSiteApp.get('/docs/vector-db.html', async () => {
       return `<!doctype html><html><head><meta charset='utf-8'><title>Vector DBs</title></head><body><h1>Vector DBs</h1><ul><li>FAISS: library, best for in-memory/offline.</li><li>Milvus: scalable service, supports sharding and replication.</li><li>PGVector: Postgres extension, great for simplicity and joins.</li></ul></body></html>`;
     });
-    
+
     await mockSiteApp.listen({ port: SITE_PORT, host: '0.0.0.0' });
 
     // Start browser gateway app
@@ -42,10 +42,11 @@ describe('Browser Gateway', () => {
           return reply.status(400).send({ error: 'host_not_allowed' });
         }
 
-        if (!browser) browser = await chromium.launch({ 
-          headless: true,
-          args: ['--no-sandbox', '--disable-dev-shm-usage']
-        });
+        if (!browser)
+          browser = await chromium.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-dev-shm-usage'],
+          });
         const ctx = await browser.newContext();
         const page = await ctx.newPage();
 
@@ -102,7 +103,7 @@ describe('Browser Gateway', () => {
     it('should return healthy status', async () => {
       const response = await fetch(`http://localhost:${GATEWAY_PORT}/healthz`);
       const data = await response.json();
-      
+
       expect(response.ok).toBe(true);
       expect(data).toEqual({ ok: true });
     });
@@ -115,14 +116,12 @@ describe('Browser Gateway', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: `http://localhost:${SITE_PORT}/docs/vector-db.html`,
-          steps: [
-            { type: 'extract', selector: 'h1' }
-          ]
-        })
+          steps: [{ type: 'extract', selector: 'h1' }],
+        }),
       });
 
       const data = await response.json();
-      
+
       expect(response.ok).toBe(true);
       expect(data.ok).toBe(true);
       expect(data.lastText).toBe('Vector DBs');
@@ -139,13 +138,13 @@ describe('Browser Gateway', () => {
           steps: [
             { type: 'extract', selector: 'li:first-child' },
             { type: 'wait', ms: 100 },
-            { type: 'extract', selector: 'li:nth-child(3)' }
-          ]
-        })
+            { type: 'extract', selector: 'li:nth-child(3)' },
+          ],
+        }),
       });
 
       const data = await response.json();
-      
+
       expect(response.ok).toBe(true);
       expect(data.ok).toBe(true);
       expect(data.lastText).toBe('PGVector: Postgres extension, great for simplicity and joins.');
@@ -158,12 +157,12 @@ describe('Browser Gateway', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: `http://localhost:${SITE_PORT}/docs/vector-db.html`,
-          steps: []
-        })
+          steps: [],
+        }),
       });
 
       const data = await response.json();
-      
+
       expect(response.ok).toBe(true);
       expect(data.ok).toBe(true);
       expect(data.stepsUsed).toBe(0);
@@ -177,14 +176,12 @@ describe('Browser Gateway', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: 'https://google.com',
-          steps: [
-            { type: 'extract', selector: 'h1' }
-          ]
-        })
+          steps: [{ type: 'extract', selector: 'h1' }],
+        }),
       });
 
       const data = await response.json();
-      
+
       expect(response.status).toBe(400);
       expect(data.error).toBe('host_not_allowed');
     });
@@ -195,14 +192,12 @@ describe('Browser Gateway', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: `http://localhost:${SITE_PORT}/docs/vector-db.html`,
-          steps: [
-            { type: 'extract', selector: 'h1' }
-          ]
-        })
+          steps: [{ type: 'extract', selector: 'h1' }],
+        }),
       });
 
       const data = await response.json();
-      
+
       expect(response.ok).toBe(true);
       expect(data.ok).toBe(true);
     });
@@ -213,14 +208,12 @@ describe('Browser Gateway', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: `http://127.0.0.1:${SITE_PORT}/docs/vector-db.html`,
-          steps: [
-            { type: 'extract', selector: 'h1' }
-          ]
-        })
+          steps: [{ type: 'extract', selector: 'h1' }],
+        }),
       });
 
       const data = await response.json();
-      
+
       expect(response.ok).toBe(true);
       expect(data.ok).toBe(true);
     });
@@ -233,14 +226,12 @@ describe('Browser Gateway', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: `http://localhost:${SITE_PORT}/docs/vector-db.html`,
-          steps: [
-            { type: 'extract', selector: 'li:contains("invalid")' }
-          ]
-        })
+          steps: [{ type: 'extract', selector: 'li:contains("invalid")' }],
+        }),
       });
 
       const data = await response.json();
-      
+
       expect(response.status).toBe(500);
       expect(data.error).toContain('not a valid selector');
     });
