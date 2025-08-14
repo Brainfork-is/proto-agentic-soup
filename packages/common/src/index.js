@@ -18,3 +18,4 @@ __exportStar(require("./types"), exports);
 __exportStar(require("./metrics"), exports);
 __exportStar(require("./util"), exports);
 __exportStar(require("./seed"), exports);
+__exportStar(require("./config"), exports);
