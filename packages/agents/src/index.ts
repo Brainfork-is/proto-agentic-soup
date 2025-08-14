@@ -41,12 +41,14 @@ export class SimpleAgent {
 
             case 'stringKit':
               if (this.tools.includes('stringKit')) {
-                result = await Tools.stringKit(step.params as {
-                  text: string;
-                  mode: 'summarize' | 'classify';
-                  labels?: string[];
-                  maxWords?: number;
-                });
+                result = await Tools.stringKit(
+                  step.params as {
+                    text: string;
+                    mode: 'summarize' | 'classify';
+                    labels?: string[];
+                    maxWords?: number;
+                  }
+                );
               } else {
                 result = { error: 'StringKit tool not available' };
               }
@@ -62,10 +64,12 @@ export class SimpleAgent {
 
             case 'retrieval':
               if (this.tools.includes('retrieval')) {
-                result = await Tools.retrieval(step.params as {
-                  query: string;
-                  useKnowledgeServer?: boolean;
-                });
+                result = await Tools.retrieval(
+                  step.params as {
+                    query: string;
+                    useKnowledgeServer?: boolean;
+                  }
+                );
               } else {
                 result = { error: 'Retrieval tool not available' };
               }
