@@ -19,7 +19,7 @@ describe('Browser Gateway Integration', () => {
   it('should return healthy status from browser gateway', async () => {
     const response = await fetch(`http://localhost:${GATEWAY_PORT}/healthz`);
     const data = await response.json();
-    
+
     expect(response.ok).toBe(true);
     expect(data).toEqual({ ok: true });
   });
@@ -27,7 +27,7 @@ describe('Browser Gateway Integration', () => {
   it('should return healthy status from site-kb', async () => {
     const response = await fetch(`http://localhost:${SITE_PORT}/healthz`);
     const data = await response.json();
-    
+
     expect(response.ok).toBe(true);
     expect(data).toEqual({ ok: true });
   });
@@ -38,12 +38,12 @@ describe('Browser Gateway Integration', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         url: 'https://google.com',
-        steps: [{ type: 'extract', selector: 'h1' }]
-      })
+        steps: [{ type: 'extract', selector: 'h1' }],
+      }),
     });
 
     const data = await response.json();
-    
+
     expect(response.status).toBe(400);
     expect(data.error).toBe('host_not_allowed');
   });
@@ -54,12 +54,12 @@ describe('Browser Gateway Integration', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         url: `http://localhost:${SITE_PORT}/docs/vector-db.html`,
-        steps: [{ type: 'extract', selector: 'h1' }]
-      })
+        steps: [{ type: 'extract', selector: 'h1' }],
+      }),
     });
 
     const data = await response.json();
-    
+
     expect(response.ok).toBe(true);
     expect(data.ok).toBe(true);
     expect(data.lastText).toBe('Vector DBs');
@@ -76,13 +76,13 @@ describe('Browser Gateway Integration', () => {
         steps: [
           { type: 'extract', selector: 'li:first-child' },
           { type: 'wait', ms: 10 },
-          { type: 'extract', selector: 'li:nth-child(3)' }
-        ]
-      })
+          { type: 'extract', selector: 'li:nth-child(3)' },
+        ],
+      }),
     });
 
     const data = await response.json();
-    
+
     expect(response.ok).toBe(true);
     expect(data.ok).toBe(true);
     expect(data.lastText).toBe('PGVector: Postgres extension, great for simplicity and joins.');
@@ -95,12 +95,12 @@ describe('Browser Gateway Integration', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         url: `http://localhost:${SITE_PORT}/docs/vector-db.html`,
-        steps: []
-      })
+        steps: [],
+      }),
     });
 
     const data = await response.json();
-    
+
     expect(response.ok).toBe(true);
     expect(data.ok).toBe(true);
     expect(data.stepsUsed).toBe(0);
