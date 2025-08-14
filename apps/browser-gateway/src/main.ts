@@ -20,7 +20,18 @@ app.post('/run', async (req, reply) => {
 
   try {
     const u = new URL(url);
-    if (!ALLOWED.includes(u.hostname)) {
+    const hostname = u.hostname;
+
+    // Check if hostname matches any allowed patterns
+    const isAllowed = ALLOWED.some((pattern) => {
+      if (pattern.startsWith('*.')) {
+        const domain = pattern.substring(2);
+        return hostname === domain || hostname.endsWith('.' + domain);
+      }
+      return hostname === pattern;
+    });
+
+    if (!isAllowed) {
       return reply.status(400).send({ error: 'host_not_allowed' });
     }
 

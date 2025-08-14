@@ -1,1 +1,78 @@
-<!doctype html><html><head><meta charset='utf-8'><title>RAG Guide</title></head><body><h1>RAG Guide</h1><p>RAG fetches documents to ground responses in facts.</p><p>Steps: chunking, indexing, retrieval, synthesis, citation.</p><p>Suggested chunk: 512-1024 tokens.</p></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>RAG Implementation Guide - Agent Knowledge Base</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .nav { background: #f5f5f5; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+        .nav ul { list-style: none; margin: 0; padding: 0; }
+        .nav li { display: inline; margin-right: 15px; }
+        .nav a { text-decoration: none; color: #0066cc; }
+        .nav a:hover { text-decoration: underline; }
+        .code { background: #f8f8f8; padding: 10px; border-radius: 4px; font-family: monospace; }
+        .highlight { background-color: #e7f3ff; padding: 15px; border-left: 4px solid #0066cc; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <ul>
+            <li><a href="/">Home</a></li>
+            <li><a href="/docs/vector-db.html">Vector Databases</a></li>
+            <li><a href="/guides/rag.html">RAG Guide</a></li>
+            <li><a href="/policies/coop.html">Cooperation Policies</a></li>
+        </ul>
+    </nav>
+
+    <h1>Retrieval Augmented Generation (RAG)</h1>
+
+    <div class="highlight">
+        <strong>RAG Definition:</strong> RAG fetches documents to ground responses in facts, improving accuracy and reducing hallucinations.
+    </div>
+
+    <h2>RAG Pipeline Components</h2>
+    <ol>
+        <li><strong>Document Processing:</strong> Split text into chunks, create embeddings</li>
+        <li><strong>Query Processing:</strong> Convert user queries to vector representations</li>
+        <li><strong>Retrieval:</strong> Find most relevant document chunks using similarity search</li>
+        <li><strong>Context Assembly:</strong> Combine retrieved chunks into coherent context</li>
+        <li><strong>Generation:</strong> Use LLM with retrieved context to generate response</li>
+    </ol>
+
+    <h2>Implementation Best Practices</h2>
+
+    <h3>Chunking Strategies</h3>
+    <ul>
+        <li><strong>Fixed-size chunks:</strong> 512-1024 tokens per chunk</li>
+        <li><strong>Semantic chunking:</strong> Split by paragraphs or sections</li>
+        <li><strong>Overlapping chunks:</strong> 50-100 token overlap for context preservation</li>
+    </ul>
+
+    <h3>Embedding Models</h3>
+    <div class="code">
+        Recommended models:
+        - all-MiniLM-L6-v2: Fast, lightweight, good general performance
+        - text-embedding-ada-002: OpenAI's high-quality embedding model
+        - e5-large: Strong performance on retrieval tasks
+    </div>
+
+    <h3>Retrieval Parameters</h3>
+    <ul>
+        <li><strong>Top-k:</strong> Typically 3-10 documents per query</li>
+        <li><strong>Similarity threshold:</strong> 0.7-0.85 for relevance filtering</li>
+        <li><strong>Re-ranking:</strong> Use cross-encoder models for better relevance</li>
+    </ul>
+
+    <h2>Advanced RAG Techniques</h2>
+    <ul>
+        <li><strong>Multi-Query RAG:</strong> Generate multiple query variations</li>
+        <li><strong>Parent-Child Chunking:</strong> Small chunks for retrieval, large chunks for context</li>
+        <li><strong>Auto-Merging:</strong> Combine related chunks from same document</li>
+        <li><strong>Corrective RAG:</strong> Re-query if initial results are poor</li>
+    </ul>
+
+    <footer style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ccc; color: #666;">
+        <p>RAG Implementation Guide | Best practices for retrieval augmented generation</p>
+    </footer>
+</body>
+</html>
