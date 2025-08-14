@@ -20,6 +20,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm -r test",
+    "redis:up": "cd infra && docker compose up -d",
+    "redis:down": "cd infra && docker compose down"
     "prisma:generate": "pnpm --filter @soup/soup-runner prisma:generate",
     "prisma:migrate": "pnpm --filter @soup/soup-runner prisma:migrate",
     "build-agent": "pnpm --filter @soup/build-agent start",

@@ -76,7 +76,7 @@ Notes:
   - soup-runner starts in bootstrap mode (health only) to avoid Redis/Prisma requirements on first run
 
 3) Full run (agents + jobs)
-- `cd infra && docker compose up -d` (start Redis on 6379)
+- Start Redis (6379): `pnpm redis:up` (or `cd infra && docker compose up -d`)
 - `pnpm --filter @soup/soup-runner prisma:generate` (generate Prisma client for SQLite)
 - `pnpm --filter @soup/soup-runner dev` (ensure `SOUP_BOOTSTRAP` is not set)
 
