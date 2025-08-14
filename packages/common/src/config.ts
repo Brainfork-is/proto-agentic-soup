@@ -15,13 +15,14 @@ const browserSchema = z.object({
   ALLOWED_HOSTS: z
     .string()
     .optional()
-    .default('localhost,127.0.0.1')
+    .default('localhost,127.0.0.1,*.local,*.example.com,httpbin.org,jsonplaceholder.typicode.com')
     .transform((s) =>
       s
         .split(',')
         .map((x) => x.trim())
         .filter(Boolean)
     ),
+  MCP_KNOWLEDGE_SERVER: z.string().optional().default(''),
 });
 
 const siteSchema = z.object({
