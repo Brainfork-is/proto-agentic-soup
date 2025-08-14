@@ -89,14 +89,14 @@ async function generateJobs() {
             question: 'Name one advantage of PGVector.',
           }
         : category === 'summarize'
-        ? { text: 'RAG fetches documents to ground responses in facts.', maxWords: 12 }
-        : category === 'classify'
-        ? {
-            text: 'Milvus supports sharding and replication.',
-            labels: ['DB', 'Not-DB', 'Unknown'],
-            answer: 'DB',
-          }
-        : { expr: '2 + 2 * 3' };
+          ? { text: 'RAG fetches documents to ground responses in facts.', maxWords: 12 }
+          : category === 'classify'
+            ? {
+                text: 'Milvus supports sharding and replication.',
+                labels: ['DB', 'Not-DB', 'Unknown'],
+                answer: 'DB',
+              }
+            : { expr: '2 + 2 * 3' };
 
     await jobQueue.add('job', {
       category,
@@ -242,7 +242,7 @@ async function main() {
       ok: true,
       mode: BOOTSTRAP ? 'bootstrap' : 'full',
       time: new Date().toISOString(),
-      services: {}
+      services: {},
     };
 
     if (!BOOTSTRAP) {
@@ -276,7 +276,7 @@ async function main() {
   }
   // Initialize Redis and Prisma only in full mode
   redis = new IORedis(cfg.REDIS_URL, {
-    maxRetriesPerRequest: null
+    maxRetriesPerRequest: null,
   });
   const { PrismaClient } = await import('@prisma/client');
   prisma = new PrismaClient();

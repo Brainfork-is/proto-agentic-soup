@@ -6,6 +6,7 @@ Why: Cheap/fast agent creation + open inter‑agent communication + selection pr
 
 Core stack: Fastify services, Redis (BullMQ queues), SQLite (Prisma), Playwright, TypeScript monorepo (pnpm).
 Agent runtime: We are adopting LangChain.js Tools and LangGraph.js to model the agent loop as a small graph (plan → act → reflect → learn). The current `SimpleAgent` heuristic is a stopgap to enable local runs without LLM keys.
+
 ## Architecture
 
 ```text
@@ -38,12 +39,14 @@ Agent runtime: We are adopting LangChain.js Tools and LangGraph.js to model the 
 ```
 
 Default ports
+
 - soup-runner: `3000` (API: `/healthz`, `/leaderboard`)
 - browser-gateway: `3100` (API: `/healthz`, `/run`)
 - site-kb: `3200` (static pages agents browse)
 - Redis: `6379` (via `infra/docker-compose.yml`)
 
 Key behaviors
+
 - Job categories: `web_research`, `summarize`, `classify`, `math` (deterministic graders).
 - Costs/rewards: browser steps charged; payouts on success; penalties on failure.
 - Evolution hooks (MVP level): simple reproduction and culling at epoch boundaries.
@@ -58,6 +61,7 @@ Key behaviors
 - Dev run: `pnpm dev`
 
 Notes:
+
 - Node 20.x LTS is pinned for this repo. Use `nvm use` (reads `.nvmrc`), or Volta (auto-picks from `package.json#volta`). Newer majors (e.g., Node 23) may emit deprecation warnings and have ecosystem incompatibilities.
 - To run the full runner (not bootstrap), start Redis (`cd infra && docker compose up -d`) and generate Prisma client:
   - `pnpm --filter @soup/soup-runner prisma:generate`
@@ -65,17 +69,20 @@ Notes:
 
 ## Quickstart
 
-1) Use Node 20 and pnpm
+1. Use Node 20 and pnpm
+
 - `nvm use` (or install Node 20.x)
 - `corepack enable && corepack prepare pnpm@9.0.0 --activate`
 
-2) Install and run
+2. Install and run
+
 - `pnpm i`
 - `pnpm dev`
   - site-kb on 3200, browser-gateway on 3100
   - soup-runner starts in bootstrap mode (health only) to avoid Redis/Prisma requirements on first run
 
-3) Full run (agents + jobs)
+3. Full run (agents + jobs)
+
 - Start Redis (6379): `pnpm redis:up` (or `cd infra && docker compose up -d`)
   - Ensure Docker is running (Docker Desktop/Colima/Podman machine). If Docker isn’t available, try `pnpm redis:run` (uses `docker run`) or install Redis locally (e.g., `brew install redis && brew services start redis`).
 - `pnpm --filter @soup/soup-runner prisma:generate` (generate Prisma client for SQLite)

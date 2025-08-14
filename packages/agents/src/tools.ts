@@ -19,7 +19,12 @@ export const Tools = {
     maxWords?: number;
   }) {
     if (i.mode === 'summarize') {
-      return { text: i.text.split(/\s+/).slice(0, i.maxWords || 12).join(' ') };
+      return {
+        text: i.text
+          .split(/\s+/)
+          .slice(0, i.maxWords || 12)
+          .join(' '),
+      };
     }
     if (i.mode === 'classify') {
       return { label: (i.labels || ['A'])[0] };
