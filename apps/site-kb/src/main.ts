@@ -14,6 +14,4 @@ app.get('/healthz', async () => ({ ok: true }));
 
 const cfg = loadSiteConfig();
 const port = cfg.SITE_KB_PORT;
-app
-  .listen({ port, host: '0.0.0.0' })
-  .then(() => console.log(`[site-kb] ${port}`));
+app.listen({ port, host: '0.0.0.0' }).then(() => console.log(`[site-kb] ${port}`));

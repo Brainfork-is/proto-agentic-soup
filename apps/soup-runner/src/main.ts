@@ -45,7 +45,7 @@ async function seedIfEmpty() {
   if (agents.length > 0) return;
 
   const seeds = JSON.parse(
-    fs.readFileSync(path.join(process.cwd(), 'seeds', 'archetypes.json'), 'utf8')
+    fs.readFileSync(path.join(__dirname, '../../../seeds', 'archetypes.json'), 'utf8')
   );
 
   for (const a of seeds.agents) {
@@ -89,14 +89,14 @@ async function generateJobs() {
             question: 'Name one advantage of PGVector.',
           }
         : category === 'summarize'
-        ? { text: 'RAG fetches documents to ground responses in facts.', maxWords: 12 }
-        : category === 'classify'
-        ? {
-            text: 'Milvus supports sharding and replication.',
-            labels: ['DB', 'Not-DB', 'Unknown'],
-            answer: 'DB',
-          }
-        : { expr: '2 + 2 * 3' };
+          ? { text: 'RAG fetches documents to ground responses in facts.', maxWords: 12 }
+          : category === 'classify'
+            ? {
+                text: 'Milvus supports sharding and replication.',
+                labels: ['DB', 'Not-DB', 'Unknown'],
+                answer: 'DB',
+              }
+            : { expr: '2 + 2 * 3' };
 
     await jobQueue.add('job', {
       category,
@@ -237,11 +237,36 @@ async function epochTick() {
 }
 
 async function main() {
-  app.get('/healthz', async () => ({
-    ok: true,
-    mode: BOOTSTRAP ? 'bootstrap' : 'full',
-    time: new Date().toISOString(),
-  }));
+  app.get('/healthz', async () => {
+    const health: any = {
+      ok: true,
+      mode: BOOTSTRAP ? 'bootstrap' : 'full',
+      time: new Date().toISOString(),
+      services: {},
+    };
+
+    if (!BOOTSTRAP) {
+      // Check Redis connection
+      try {
+        await redis.ping();
+        health.services.redis = { status: 'healthy', url: cfg.REDIS_URL };
+      } catch (error) {
+        health.ok = false;
+        health.services.redis = { status: 'unhealthy', error: (error as Error).message };
+      }
+
+      // Check Prisma/SQLite connection
+      try {
+        await prisma.$queryRaw`SELECT 1 as test`;
+        health.services.database = { status: 'healthy', type: 'sqlite' };
+      } catch (error) {
+        health.ok = false;
+        health.services.database = { status: 'unhealthy', error: (error as Error).message };
+      }
+    }
+
+    return health;
+  });
 
   if (BOOTSTRAP) {
     // Minimal server only; skip external services for M-1 dev
@@ -250,7 +275,9 @@ async function main() {
     return;
   }
   // Initialize Redis and Prisma only in full mode
-  redis = new IORedis(cfg.REDIS_URL);
+  redis = new IORedis(cfg.REDIS_URL, {
+    maxRetriesPerRequest: null,
+  });
   const { PrismaClient } = await import('@prisma/client');
   prisma = new PrismaClient();
   await prisma.$connect();
