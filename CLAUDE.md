@@ -171,3 +171,31 @@ When running development servers or any background processes:
 - The soup-runner needs a local `.env` file with `DATABASE_URL=file:./dev.db` for Prisma
 - Redis must be running (`pnpm redis:up`) before starting the full system
 - Database must be initialized (`pnpm prisma:migrate`) before first run
+
+### Pre-Push Checklist
+
+**ALWAYS run these commands before committing/pushing changes:**
+
+```bash
+# Format all code
+pnpm format
+
+# Verify formatting passes
+pnpm format:check
+
+# Verify linting passes  
+pnpm lint
+
+# Generate Prisma client (if schema changed)
+pnpm prisma:generate
+
+# Test build passes
+pnpm --filter @soup/common build
+pnpm --filter @soup/agents build  
+pnpm --filter @soup/browser-gateway build
+pnpm --filter @soup/site-kb build
+pnpm --filter @soup/build-agent build
+pnpm --filter @soup/soup-runner build
+```
+
+**Why this matters:** The CI pipeline runs these exact checks. Failing to run them locally will cause CI failures and delay PR merges. Always verify locally before pushing.
