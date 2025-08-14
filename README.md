@@ -5,7 +5,7 @@ Agentic Soup is a single‑machine experiment to observe basic “survival of th
 Why: Cheap/fast agent creation + open inter‑agent communication + selection pressure (costs/rewards) should lead to a few high‑fitness “super‑agents” capturing most throughput. This repo provides the substrate to test early signals of that behavior.
 
 Core stack: Fastify services, Redis (BullMQ queues), SQLite (Prisma), Playwright, TypeScript monorepo (pnpm).
-
+Agent runtime: We are adopting LangChain.js Tools and LangGraph.js to model the agent loop as a small graph (plan → act → reflect → learn). The current `SimpleAgent` heuristic is a stopgap to enable local runs without LLM keys.
 ## Architecture
 
 ```text
@@ -25,9 +25,10 @@ Core stack: Fastify services, Redis (BullMQ queues), SQLite (Prisma), Playwright
 │  - /healthz, /leaderboard    │    └──────────────────────────────┘
 │                              │
 │  Agents (workers)            │   ┌────────────────────────────────┐
-│  - @soup/agents (SimpleAgent)│   │   Redis (6379)                 │
+│  - SimpleAgent (temp)        │   │   Redis (6379)                 │
 │  - Tools: browser, stringKit │◀──┤   BullMQ queues (jobs)         │
 │           calc, retrieval    │   └────────────────────────────────┘
+│  - Target: LangGraph.js      │
 │                              │
 │  State: Prisma + SQLite      │
 └──────────────┬───────────────┘
@@ -87,7 +88,7 @@ Notes:
   - `soup-runner/`: orchestrator (jobs, graders, bank, metrics, agents)
 - `packages/`
   - `common/`: shared types/util, metrics (Gini), seeds
-  - `agents/`: SimpleAgent loop + tool adapters (`browserRun`, `stringKit`, `calc`, `retrieval`)
+  - `agents/`: SimpleAgent (temporary) + tool adapters (`browserRun`, `stringKit`, `calc`, `retrieval`). Will be refactored to LangGraph.js + LangChain.js.
 - `infra/`: `docker-compose.yml` for Redis
 - `docs/`: spec and tickets (`tech-spec.md`, `tickets.md`)
 - `seeds/`: archetypes for initial agent population

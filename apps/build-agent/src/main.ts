@@ -1,14 +1,13 @@
 import fs from 'fs-extra';
 import path from 'path';
-import { execSync } from 'child_process';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 type Ticket = {
-  id: string; // e.g., M-1
-  title: string; // short title
-  epic?: string; // optional inferred epic
-  rawLines: string[]; // the lines for this ticket block
+  id: string;
+  title: string;
+  epic?: string;
+  rawLines: string[];
   checked: boolean;
 };
 
@@ -16,7 +15,7 @@ const repoRoot = path.resolve(__dirname, '../../..');
 const ticketsPath = path.join(repoRoot, 'docs', 'tickets.md');
 const conceptPath = path.join(repoRoot, 'docs', 'concept.md');
 const specPath = path.join(repoRoot, 'docs', 'tech-spec.md');
-const promptsDir = path.join(repoRoot, 'docs', 'agent-prompts');
+const defaultPromptsDir = path.join(repoRoot, 'docs', 'agent-prompts');
 
 function readMarkdown(filePath: string): string {
   if (!fs.existsSync(filePath)) throw new Error(`Missing file: ${filePath}`);
@@ -34,15 +33,12 @@ function parseTickets(md: string): Ticket[] {
       currentEpic = `Epic ${epicMatch[1]} — ${epicMatch[2]}`;
       continue;
     }
-    // Be tolerant of trailing details, Unicode line separators, etc.
-    // Only require the checklist, [ID], and the bolded title; ignore the remainder of the line.
     const ticketMatch = /^-\s+\[( |x)\]\s+\*\*\[([^\]]+)\]\s+(.+?)\*\*/.exec(line);
     if (ticketMatch) {
       const checked = ticketMatch[1] === 'x';
       const id = ticketMatch[2].trim();
       const title = ticketMatch[3].trim();
       const rawLines = [line];
-      // Include following detail lines until next bullet or header
       let j = i + 1;
       while (j < lines.length && !/^\s*-\s+\[/.test(lines[j]) && !/^#/.test(lines[j])) {
         rawLines.push(lines[j]);
@@ -55,8 +51,8 @@ function parseTickets(md: string): Ticket[] {
 }
 
 function selectNextTicket(tickets: Ticket[], id?: string): Ticket | undefined {
-  if (id) return tickets.find(t => t.id === id);
-  return tickets.find(t => !t.checked);
+  if (id) return tickets.find((t) => t.id === id);
+  return tickets.find((t) => !t.checked);
 }
 
 function ensureDir(dir: string) {
@@ -117,65 +113,21 @@ function generatePrompt(ticket: Ticket, concept: string, spec: string): string {
   ].join('\n');
 }
 
-function writePrompt(ticket: Ticket, content: string): string {
-  ensureDir(promptsDir);
-  const file = path.join(promptsDir, `${ticket.id}.md`);
+function writePrompt(outDir: string, ticket: Ticket, content: string): string {
+  ensureDir(outDir);
+  const file = path.join(outDir, `${ticket.id}.md`);
   fs.writeFileSync(file, content);
   return file;
-}
-
-function checkOffTicket(md: string, id: string): string {
-  // Replace the first occurrence of "- [ ] **[ID]" with "- [x] **[ID]"
-  const pattern = new RegExp(`(- \\\[ \\\] \\\*\\\\\\[${id.replace(/[-]/g, '\\$&')}\\\\\\] )`);
-  if (pattern.test(md)) return md.replace(pattern, '- [x] **[' + id + '] ');
-  // Fallback: direct string replace if regex fails
-  return md.replace(`- [ ] **[${id}]`, `- [x] **[${id}]`);
-}
-
-function run(cmd: string) {
-  return execSync(cmd, { stdio: 'inherit', cwd: repoRoot });
-}
-
-function createBranchAndCommit(ticket: Ticket, branch?: string, skipBranch?: boolean) {
-  const safeTitle = ticket.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  const br = branch || `feat/${ticket.id.toLowerCase()}-${safeTitle}`;
-  if (!skipBranch) run(`git checkout -b ${br}`);
-  run('git add -A');
-  const scope = (ticket.epic?.match(/^Epic\s+([A-Z])/)?.[1] || 'repo').toLowerCase();
-  const msg = `feat(${scope}): complete ${ticket.id} - ${ticket.title}`;
-  run(`git commit -m ${JSON.stringify(msg)}`);
-  return br;
-}
-
-function tryCreatePR(branch: string, title: string, bodyPath?: string) {
-  try {
-    execSync('gh --version', { stdio: 'ignore' });
-  } catch {
-    console.error('GitHub CLI not found; skipping PR creation.');
-    return false;
-  }
-  const bodyArg = bodyPath ? `-F ${bodyPath}` : '';
-  try {
-    run(`gh pr create -t ${JSON.stringify(title)} ${bodyArg}`);
-    return true;
-  } catch (e) {
-    console.error('Failed to create PR via gh:', e);
-    return false;
-  }
 }
 
 async function main() {
   const argv = await yargs(hideBin(process.argv))
     .option('id', { type: 'string', describe: 'Ticket id like M-1' })
-    .option('generate', { type: 'boolean', default: true, describe: 'Generate Codex prompt' })
-    .option('run-codex', { type: 'string', describe: 'Command template to run Codex CLI, e.g., "codex --prompt {file}"' })
-    .option('auto', { type: 'boolean', default: true, describe: 'Auto-run Codex if available (use --no-auto to disable)' })
-    .option('codex-timeout', { type: 'number', default: 600, describe: 'Timeout for Codex run in seconds' })
-    .option('print-prompt', { type: 'boolean', default: true, describe: 'Print generated prompt content to stdout' })
-    .option('open-prompt', { type: 'boolean', default: false, describe: 'Open prompt file in default editor (macOS/Linux)' })
-    .option('check-off', { type: 'boolean', default: false, describe: 'Mark the ticket as completed in docs/tickets.md' })
-    .option('commit', { type: 'boolean', default: false, describe: 'Create branch and commit changes' })
-    .option('create-pr', { type: 'boolean', default: false, describe: 'Create PR via GitHub CLI if available' })
+    .option('out-dir', {
+      type: 'string',
+      default: defaultPromptsDir,
+      describe: 'Output directory for prompts',
+    })
     .strict()
     .help()
     .argv;
@@ -184,7 +136,7 @@ async function main() {
   const spec = readMarkdown(specPath);
   const ticketsMd = readMarkdown(ticketsPath);
   const tickets = parseTickets(ticketsMd);
-  const ticket = selectNextTicket(tickets, argv.id);
+  const ticket = selectNextTicket(tickets, (argv as any).id);
   if (!ticket) {
     console.error('No matching or remaining ticket found.');
     process.exit(1);
@@ -192,98 +144,16 @@ async function main() {
 
   console.log(`Selected ticket: ${ticket.id} — ${ticket.title}`);
 
-  let promptFile: string | undefined;
-  if (argv.generate) {
-    const prompt = generatePrompt(ticket, concept, spec);
-    promptFile = writePrompt(ticket, prompt);
-    console.log(`Prompt written to ${path.relative(repoRoot, promptFile)}`);
-    if (argv['print-prompt']) {
-      try {
-        const content = fs.readFileSync(promptFile, 'utf8');
-        const divider = '-'.repeat(80);
-        console.log(divider);
-        console.log(`# Prompt Preview: ${path.relative(repoRoot, promptFile)}`);
-        console.log(divider);
-        console.log(content);
-        console.log(divider);
-      } catch (e) {
-        console.error('[build-agent] Failed to read prompt for printing:', e instanceof Error ? e.message : e);
-      }
-    }
-    if (argv['open-prompt']) {
-      try {
-        // macOS: open, Linux: xdg-open; ignore failures if not present
-        try { execSync(`open ${JSON.stringify(promptFile)}`, { stdio: 'ignore' }); }
-        catch { execSync(`xdg-open ${JSON.stringify(promptFile)}`, { stdio: 'ignore' }); }
-      } catch {}
-    }
-  }
-
-  // Optionally invoke Codex CLI
-  if (promptFile) {
-    const timeoutMs = Math.max(1, Number(argv['codex-timeout'] || 600)) * 1000;
-
-    const replaceFile = (template: string) => {
-      const quoted = JSON.stringify(promptFile);
-      return template.includes('{file}') ? template.replace('{file}', quoted) : `${template} ${quoted}`;
-    };
-
-    const tryRun = (template: string) => {
-      const cmd = replaceFile(template);
-      console.log(`[build-agent] Running: ${cmd}`);
-      try {
-        execSync(cmd, { stdio: 'inherit', cwd: repoRoot, timeout: timeoutMs });
-        return true;
-      } catch (e) {
-        console.error('[build-agent] Codex CLI invocation failed or timed out:', e instanceof Error ? e.message : e);
-        return false;
-      }
-    };
-
-    const detectCodex = (): string | undefined => {
-      // Allow override via env
-      const envCmd = process.env.CODEX_CLI;
-      if (envCmd && envCmd.trim()) return envCmd.trim();
-      try {
-        execSync('command -v codex', { stdio: 'ignore' });
-        // Default to positional prompt argument
-        return 'codex {file}';
-      } catch {}
-      try {
-        execSync('codex --version', { stdio: 'ignore' });
-        return 'codex {file}';
-      } catch {}
-      return undefined;
-    };
-
-    if (argv['run-codex']) {
-      tryRun(String(argv['run-codex']));
-    } else if (argv.auto !== false) {
-      const auto = detectCodex();
-      if (auto) {
-        tryRun(auto);
-      } else {
-        console.log('[build-agent] Codex CLI not found in PATH (or CODEX_CLI not set); skipping auto-run.');
-      }
-    }
-  }
-
-  if (argv["check-off"]) {
-    const updated = checkOffTicket(ticketsMd, ticket.id);
-    fs.writeFileSync(ticketsPath, updated);
-    console.log(`Checked off ${ticket.id} in docs/tickets.md`);
-  }
-
-  if (argv.commit) {
-    const branch = createBranchAndCommit(ticket);
-    console.log(`Committed on branch ${branch}`);
-    if (argv["create-pr"]) {
-      const title = `Complete ${ticket.id} — ${ticket.title}`;
-      const bodyPath = promptFile && fs.existsSync(promptFile) ? promptFile : undefined;
-      tryCreatePR(branch, title, bodyPath);
-    }
-  }
+  const outDir = String((argv as any)['out-dir'] || defaultPromptsDir);
+  const prompt = generatePrompt(ticket, concept, spec);
+  const promptFile = writePrompt(outDir, ticket, prompt);
+  console.log(`Prompt written to ${path.relative(repoRoot, promptFile)}`);
 }
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
 
 main().catch((err) => {
   console.error(err);
