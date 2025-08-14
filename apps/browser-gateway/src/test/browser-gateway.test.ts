@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { chromium, Browser } from 'playwright';
-import { loadBrowserConfig } from '@soup/common';
 
 describe('Browser Gateway', () => {
   let app: any;
@@ -31,7 +30,7 @@ describe('Browser Gateway', () => {
 
     app.get('/healthz', async () => ({ ok: true }));
 
-    app.post('/run', async (req, reply) => {
+    app.post('/run', async (req: any, reply: any) => {
       const b: any = (req as any).body || {};
       const url: string = b.url;
       const steps: any[] = b.steps || [];

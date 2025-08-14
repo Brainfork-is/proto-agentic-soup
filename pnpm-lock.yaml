@@ -43,7 +43,7 @@ importers:
         version: 1.54.2
     devDependencies:
       '@types/node':
-        specifier: ^20.14.9
+        specifier: ^20.19.10
         version: 20.19.10
       tsx:
         specifier: ^4.16.2
