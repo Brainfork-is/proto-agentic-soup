@@ -8,7 +8,7 @@
 # Epic M — Foundations
 - [x] **[M-1] Monorepo bootstrap (pnpm + TS config)** — S **Desc:** Initialize workspace, tsconfig base, path aliases for packages, scripts (build/dev/test). **AC:** pnpm i, pnpm -r build, pnpm dev (no runtime errors). **Tasks:** Create pnpm-workspace.yaml; root package.json scripts; tsconfig.base.json; .gitignore.
 - [x] **[M-2] Dev env & env vars** — S **Desc:** .env.example with Redis/DB/LLM caps; config loader. **AC:** dotenv loads; missing var → sensible defaults. **Tasks:** Config module; runtime validation with zod.
-- [ ] **[M-3] Docker Compose: Redis** — S **Desc:** Single Redis service on 6379 for queues + pub/sub. **AC:** docker compose up -d → health OK; app connects.
+- [x] **[M-3] Docker Compose: Redis** — S **Desc:** Single Redis service on 6379 for queues + pub/sub. **AC:** docker compose up -d → health OK; app connects.
 - [ ] **[M-4] Health endpoints** — S **Desc:** GET /healthz for all apps. **AC:** Returns { ok: true } and timestamp.
 - [ ] **[M-5] Prisma + SQLite setup** — M **Desc:** Prisma schema + migrations; generate client. **AC:** pnpm prisma:migrate creates dev.db; seed script runs.
 - [ ] **[M-6] CI skeleton** — M **Desc:** GitHub Actions: install, build, typecheck. **AC:** PRs block on build; cache pnpm.
