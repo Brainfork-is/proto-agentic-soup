@@ -24,28 +24,28 @@
 
 # Epic O — Market & Bank
 
-- [ ] **[O-1] Job generator** — M **Desc:** Generate ~10 jobs/min across web_research|summarize|classify|math; enqueue to BullMQ. **AC:** Queue depth rises at expected rate; payload JSON valid.
-- [ ] **[O-2] Job claim/ack flow** — M **Desc:** Provide API/queue pattern for agents to claim one job atomically. **AC:** No double assignment; unacknowledged jobs requeued after timeout.
-- [ ] **[O-3] Auto‑graders** — L **Desc:** Deterministic graders: regex substring for web_research; length & n‑gram/ratio for summarize; exact for classify; safe eval for math. **AC:** Unit tests cover pass/fail cases per category.
-- [ ] **[O-4] Ledger & payouts** — M **Desc:** Single‑entry deltas (credits) for MVP; /payout and /charge internally invoked. **AC:** Balance updates transactional; leaderboard query returns top agents.
-- [ ] **[O-5] Penalties & deadlines** — S **Desc:** Late/failed submission incurs fixed penalty. **AC:** Missed deadlineS → negative ledger entry.
-- [ ] **[O-6] Cost schema** — S **Desc:** Unit costs: per LLM call, per browser step, per message. **AC:** Costs applied consistently; toggled via .env.
+- [x] **[O-1] Job generator** — M **Desc:** Generate ~10 jobs/min across web_research|summarize|classify|math; enqueue to BullMQ. **AC:** Queue depth rises at expected rate; payload JSON valid.
+- [x] **[O-2] Job claim/ack flow** — M **Desc:** Provide API/queue pattern for agents to claim one job atomically. **AC:** No double assignment; unacknowledged jobs requeued after timeout.
+- [x] **[O-3] Auto‑graders** — L **Desc:** Deterministic graders: regex substring for web_research; length & n‑gram/ratio for summarize; exact for classify; safe eval for math. **AC:** Unit tests cover pass/fail cases per category.
+- [x] **[O-4] Ledger & payouts** — M **Desc:** Single‑entry deltas (credits) for MVP; /payout and /charge internally invoked. **AC:** Balance updates transactional; leaderboard query returns top agents.
+- [x] **[O-5] Penalties & deadlines** — S **Desc:** Late/failed submission incurs fixed penalty. **AC:** Missed deadlineS → negative ledger entry.
+- [x] **[O-6] Cost schema** — S **Desc:** Unit costs: per LLM call, per browser step, per message. **AC:** Costs applied consistently; toggled via .env.
 
 # Epic P — Agent Runtime
 
 - [ ] **[P-1] Agent loop (mock planner)** — L **Desc:** Baseline planner (heuristics); actor executes tool calls; reflector adjusts plan; heartbeat. **AC:** Agent completes at least one job in each category using heuristics.
-- [ ] **[P-2] Tools: browser adapter** — S **Desc:** browserRun({ url, steps[] }) wrapper to /run. **AC:** Returns lastText and contentLength to the actor.
+- [x] **[P-2] Tools: browser adapter** — S **Desc:** browserRun({ url, steps[] }) wrapper to /run. **AC:** Returns lastText and contentLength to the actor.
 - [ ] **[P-3] Tools: retrieval‑local** — M **Desc:** Load site content into in‑memory corpus; simple keyword search; return snippet. **AC:** Query for “PGVector” returns section mentioning joins.
-- [ ] **[P-4] Tools: stringKit & calc** — S **Desc:** Summarize/extract/classify prompt wrappers; arithmetic eval. **AC:** Unit tests for each helper.
+- [x] **[P-4] Tools: stringKit & calc** — S **Desc:** Summarize/extract/classify prompt wrappers; arithmetic eval. **AC:** Unit tests for each helper.
 - [ ] **[P-5] Memory stub** — S **Desc:** In‑process KV for last K jobs; later swap to SQLite table. **AC:** remember/recall works across ticks.
-- [ ] **[P-6] Archetype seeds (6 types × 10 variants)** — M **Desc:** JSON blueprints differing in temperature, tools, coop threshold, planner style. **AC:** Loader spawns 60 agents from seeds.
+- [x] **[P-6] Archetype seeds (6 types × 10 variants)** — M **Desc:** JSON blueprints differing in temperature, tools, coop threshold, planner style. **AC:** Loader spawns 60 agents from seeds.
 - [ ] **[P-7] Optional LLM planner** — M **Desc:** Switchable planner using OpenAI when keys present; token budget aware. **AC:** Environment toggle; fallback to mock when rate‑limited.
 
 # Epic Q — Orchestrator & Evolution
 
-- [ ] **[Q-1] Epoch scheduler** — M **Desc:** Clock‑driven epochs (default 120 min). Triggers reproduction/culling and metrics snapshot. **AC:** Logs show epoch boundaries; hooks fire reliably.
-- [ ] **[Q-2] Reproduction** — M **Desc:** If balance ≥ minBalance, spawn 1–2 offspring with discrete mutation (temp/tools/coop/planner). Deduct spawn cost. **AC:** Offspring inherit parent + diff; lineage recorded in log.
-- [ ] **[Q-3] Culling** — S **Desc:** Kill bottom 20% by balance or any negative balance at epoch end. **AC:** Agents marked not alive; stop claiming jobs.
+- [x] **[Q-1] Epoch scheduler** — M **Desc:** Clock‑driven epochs (default 120 min). Triggers reproduction/culling and metrics snapshot. **AC:** Logs show epoch boundaries; hooks fire reliably.
+- [x] **[Q-2] Reproduction** — M **Desc:** If balance ≥ minBalance, spawn 1–2 offspring with discrete mutation (temp/tools/coop/planner). Deduct spawn cost. **AC:** Offspring inherit parent + diff; lineage recorded in log.
+- [x] **[Q-3] Culling** — S **Desc:** Kill bottom 20% by balance or any negative balance at epoch end. **AC:** Agents marked not alive; stop claiming jobs.
 - [ ] **[Q-4] Shock script** — S **Desc:** At hour 12, shift job mix (+web_research), +50% message/browser costs. **AC:** Config changes applied; job distribution/charges reflect.
 - [ ] **[Q-5] Ablation script** — S **Desc:** At hour 20, pause/remove top earner for 30 minutes; record throughput delta. **AC:** CSV shows before/after jobs/min; agent reinstated.
 
