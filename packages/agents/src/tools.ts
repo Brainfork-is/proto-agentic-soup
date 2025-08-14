@@ -7,7 +7,6 @@ export const Tools = {
 
   async calc(i: { expr: string }) {
     if (!/^[0-9+\-*/().\s]+$/.test(i.expr)) return { ok: false } as const;
-    // eslint-disable-next-line no-eval
     const v = eval(i.expr);
     return { ok: true, value: v } as const;
   },
