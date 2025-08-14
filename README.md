@@ -5,9 +5,7 @@ Agentic Soup is a single‑machine experiment to observe basic “survival of th
 Why: Cheap/fast agent creation + open inter‑agent communication + selection pressure (costs/rewards) should lead to a few high‑fitness “super‑agents” capturing most throughput. This repo provides the substrate to test early signals of that behavior.
 
 Core stack: Fastify services, Redis (BullMQ queues), SQLite (Prisma), Playwright, TypeScript monorepo (pnpm).
-
 Agent runtime: We are adopting LangChain.js Tools and LangGraph.js to model the agent loop as a small graph (plan → act → reflect → learn). The current `SimpleAgent` heuristic is a stopgap to enable local runs without LLM keys.
-
 ## Architecture
 
 ```text

@@ -4,10 +4,10 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
 type Ticket = {
-  id: string; // e.g., M-1
-  title: string; // short title
-  epic?: string; // optional inferred epic
-  rawLines: string[]; // the lines for this ticket block
+  id: string;
+  title: string;
+  epic?: string;
+  rawLines: string[];
   checked: boolean;
 };
 
@@ -33,15 +33,12 @@ function parseTickets(md: string): Ticket[] {
       currentEpic = `Epic ${epicMatch[1]} — ${epicMatch[2]}`;
       continue;
     }
-    // Be tolerant of trailing details, Unicode line separators, etc.
-    // Only require the checklist, [ID], and the bolded title; ignore the remainder of the line.
     const ticketMatch = /^-\s+\[( |x)\]\s+\*\*\[([^\]]+)\]\s+(.+?)\*\*/.exec(line);
     if (ticketMatch) {
       const checked = ticketMatch[1] === 'x';
       const id = ticketMatch[2].trim();
       const title = ticketMatch[3].trim();
       const rawLines = [line];
-      // Include following detail lines until next bullet or header
       let j = i + 1;
       while (j < lines.length && !/^\s*-\s+\[/.test(lines[j]) && !/^#/.test(lines[j])) {
         rawLines.push(lines[j]);
@@ -54,8 +51,8 @@ function parseTickets(md: string): Ticket[] {
 }
 
 function selectNextTicket(tickets: Ticket[], id?: string): Ticket | undefined {
-  if (id) return tickets.find(t => t.id === id);
-  return tickets.find(t => !t.checked);
+  if (id) return tickets.find((t) => t.id === id);
+  return tickets.find((t) => !t.checked);
 }
 
 function ensureDir(dir: string) {
@@ -126,7 +123,11 @@ function writePrompt(outDir: string, ticket: Ticket, content: string): string {
 async function main() {
   const argv = await yargs(hideBin(process.argv))
     .option('id', { type: 'string', describe: 'Ticket id like M-1' })
-    .option('out-dir', { type: 'string', default: defaultPromptsDir, describe: 'Output directory for prompts' })
+    .option('out-dir', {
+      type: 'string',
+      default: defaultPromptsDir,
+      describe: 'Output directory for prompts',
+    })
     .strict()
     .help()
     .argv;
@@ -135,7 +136,7 @@ async function main() {
   const spec = readMarkdown(specPath);
   const ticketsMd = readMarkdown(ticketsPath);
   const tickets = parseTickets(ticketsMd);
-  const ticket = selectNextTicket(tickets, argv.id);
+  const ticket = selectNextTicket(tickets, (argv as any).id);
   if (!ticket) {
     console.error('No matching or remaining ticket found.');
     process.exit(1);
@@ -143,11 +144,16 @@ async function main() {
 
   console.log(`Selected ticket: ${ticket.id} — ${ticket.title}`);
 
-  const outDir = String(argv['out-dir'] || defaultPromptsDir);
+  const outDir = String((argv as any)['out-dir'] || defaultPromptsDir);
   const prompt = generatePrompt(ticket, concept, spec);
   const promptFile = writePrompt(outDir, ticket, prompt);
   console.log(`Prompt written to ${path.relative(repoRoot, promptFile)}`);
 }
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
 
 main().catch((err) => {
   console.error(err);
