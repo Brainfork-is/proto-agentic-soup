@@ -252,7 +252,7 @@ async function main() {
         health.services.redis = { status: 'healthy', url: cfg.REDIS_URL };
       } catch (error) {
         health.ok = false;
-        health.services.redis = { status: 'unhealthy', error: error.message };
+        health.services.redis = { status: 'unhealthy', error: (error as Error).message };
       }
 
       // Check Prisma/SQLite connection
@@ -261,7 +261,7 @@ async function main() {
         health.services.database = { status: 'healthy', type: 'sqlite' };
       } catch (error) {
         health.ok = false;
-        health.services.database = { status: 'unhealthy', error: error.message };
+        health.services.database = { status: 'unhealthy', error: (error as Error).message };
       }
     }
 
