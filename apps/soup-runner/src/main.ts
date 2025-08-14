@@ -1,30 +1,24 @@
 import Fastify from 'fastify';
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import { config } from 'dotenv';
 // Prisma is imported dynamically to avoid requiring a generated client in bootstrap mode
 // import { PrismaClient } from '@prisma/client';
-import { nowIso, gini, topKShare } from '@soup/common';
+import { nowIso, gini, topKShare, loadRunnerConfig } from '@soup/common';
 import fs from 'fs-extra';
 import path from 'path';
 import { SimpleAgent } from '@soup/agents';
 
-config();
-
-// Provide sane defaults so dev bootstrap doesn't crash
-if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = 'file:./dev.db';
-}
-const BOOTSTRAP = process.env.SOUP_BOOTSTRAP === '1' || process.env.BOOTSTRAP === '1';
+const cfg = loadRunnerConfig();
+const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
 const app = Fastify();
 let redis: any;
 let prisma: any;
 
-const JOBS_PER_MIN = Number(process.env.JOBS_PER_MIN || 10);
-const EPOCH_MINUTES = Number(process.env.EPOCH_MINUTES || 120);
-const FAIL_PENALTY = Number(process.env.FAIL_PENALTY || 3);
-const STEP_COST = Number(process.env.BROWSER_STEP_COST || 1);
+const JOBS_PER_MIN = cfg.JOBS_PER_MIN;
+const EPOCH_MINUTES = cfg.EPOCH_MINUTES;
+const FAIL_PENALTY = cfg.FAIL_PENALTY;
+const STEP_COST = cfg.BROWSER_STEP_COST;
 
 const RUN_DIR = path.join(process.cwd(), 'runs', String(Date.now()));
 const METRICS_DIR = path.join(RUN_DIR, 'metrics');
@@ -251,12 +245,12 @@ async function main() {
 
   if (BOOTSTRAP) {
     // Minimal server only; skip external services for M-1 dev
-    await app.listen({ port: Number(process.env.PORT || 3000), host: '0.0.0.0' });
-    console.log(`[soup-runner] ${process.env.PORT || 3000} (bootstrap)`);
+    await app.listen({ port: cfg.SOUP_RUNNER_PORT, host: '0.0.0.0' });
+    console.log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT} (bootstrap)`);
     return;
   }
   // Initialize Redis and Prisma only in full mode
-  redis = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379');
+  redis = new IORedis(cfg.REDIS_URL);
   const { PrismaClient } = await import('@prisma/client');
   prisma = new PrismaClient();
   await prisma.$connect();
@@ -269,8 +263,8 @@ async function main() {
   await startAgentWorkers();
   setInterval(() => epochTick().catch(console.error), EPOCH_MINUTES * 60_000);
   app
-    .listen({ port: Number(process.env.PORT || 3000), host: '0.0.0.0' })
-    .then(() => console.log(`[soup-runner] ${process.env.PORT || 3000}`));
+    .listen({ port: cfg.SOUP_RUNNER_PORT, host: '0.0.0.0' })
+    .then(() => console.log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT}`));
 }
 
 main().catch((e) => {
