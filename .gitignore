@@ -11,6 +11,12 @@ lerna-debug.log*
 dist/
 *.tsbuildinfo
 
+# Prevent committing compiled JS into source trees
+apps/**/src/**/*.js
+packages/**/src/**/*.js
+apps/**/src/**/*.js.map
+packages/**/src/**/*.js.map
+
 # Coverage / testing
 coverage/
 .nyc_output/
@@ -43,4 +49,3 @@ log/
 tmp/
 temp/
 .cache/
-
