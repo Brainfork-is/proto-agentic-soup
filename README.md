@@ -1,5 +1,51 @@
-# agentic-soup (MVP + Web Browsing, with Agents)
-Single-machine MVP with Redis, SQLite, Playwright, and agent workers. See quickstart in README after unzip.
+# Agentic Soup — MVP with Web Browsing
+
+Agentic Soup is a single‑machine experiment to observe basic “survival of the fittest” dynamics among software agents competing for work. It runs a small market of deterministic jobs, a pool of agents with minimal tools, and a browser gateway over a tiny local website — all in TypeScript/Node on your machine.
+
+Why: Cheap/fast agent creation + open inter‑agent communication + selection pressure (costs/rewards) should lead to a few high‑fitness “super‑agents” capturing most throughput. This repo provides the substrate to test early signals of that behavior.
+
+Core stack: Fastify services, Redis (BullMQ queues), SQLite (Prisma), Playwright, TypeScript monorepo (pnpm).
+
+## Architecture
+
+```text
+                           ┌───────────────────────────┐
+                           │        site-kb (3200)     │
+                           │  Fastify static website   │
+                           │  / (RAG guides, docs)     │
+                           └──────────────┬────────────┘
+                                          │ (browse)
+                              HTTP        │
+                                          ▼
+┌──────────────────────────────┐    ┌──────────────────────────────┐
+│  soup-runner (3000)          │    │  browser-gateway (3100)      │
+│  Fastify API + Orchestrator  │    │  Fastify + Playwright        │
+│  - Job generator (BullMQ)    │◀──▶│  - /run: click/type/wait     │
+│  - Auto-graders + bank       │    │  - /healthz                  │
+│  - /healthz, /leaderboard    │    └──────────────────────────────┘
+│                              │
+│  Agents (workers)            │   ┌────────────────────────────────┐
+│  - @soup/agents (SimpleAgent)│   │   Redis (6379)                 │
+│  - Tools: browser, stringKit │◀──┤   BullMQ queues (jobs)         │
+│           calc, retrieval    │   └────────────────────────────────┘
+│                              │
+│  State: Prisma + SQLite      │
+└──────────────┬───────────────┘
+               │
+               ▼
+        SQLite dev.db (Prisma)
+```
+
+Default ports
+- soup-runner: `3000` (API: `/healthz`, `/leaderboard`)
+- browser-gateway: `3100` (API: `/healthz`, `/run`)
+- site-kb: `3200` (static pages agents browse)
+- Redis: `6379` (via `infra/docker-compose.yml`)
+
+Key behaviors
+- Job categories: `web_research`, `summarize`, `classify`, `math` (deterministic graders).
+- Costs/rewards: browser steps charged; payouts on success; penalties on failure.
+- Evolution hooks (MVP level): simple reproduction and culling at epoch boundaries.
 
 ## Development
 
@@ -15,6 +61,36 @@ Notes:
 - To run the full runner (not bootstrap), start Redis (`cd infra && docker compose up -d`) and generate Prisma client:
   - `pnpm --filter @soup/soup-runner prisma:generate`
   - then run `pnpm --filter @soup/soup-runner dev` after unsetting `SOUP_BOOTSTRAP` or use `start` from dist.
+
+## Quickstart
+
+1) Use Node 20 and pnpm
+- `nvm use` (or install Node 20.x)
+- `corepack enable && corepack prepare pnpm@9.0.0 --activate`
+
+2) Install and run
+- `pnpm i`
+- `pnpm dev`
+  - site-kb on 3200, browser-gateway on 3100
+  - soup-runner starts in bootstrap mode (health only) to avoid Redis/Prisma requirements on first run
+
+3) Full run (agents + jobs)
+- `cd infra && docker compose up -d` (start Redis on 6379)
+- `pnpm --filter @soup/soup-runner prisma:generate` (generate Prisma client for SQLite)
+- `pnpm --filter @soup/soup-runner dev` (ensure `SOUP_BOOTSTRAP` is not set)
+
+## Repo Layout
+
+- `apps/`
+  - `browser-gateway/`: Playwright HTTP API for deterministic browsing
+  - `site-kb/`: local knowledge-base website with static pages
+  - `soup-runner/`: orchestrator (jobs, graders, bank, metrics, agents)
+- `packages/`
+  - `common/`: shared types/util, metrics (Gini), seeds
+  - `agents/`: SimpleAgent loop + tool adapters (`browserRun`, `stringKit`, `calc`, `retrieval`)
+- `infra/`: `docker-compose.yml` for Redis
+- `docs/`: spec and tickets (`tech-spec.md`, `tickets.md`)
+- `seeds/`: archetypes for initial agent population
 
 ## Code Style & Formatting
 
