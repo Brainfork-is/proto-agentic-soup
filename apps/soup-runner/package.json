@@ -5,9 +5,10 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/main.ts",
+    "dev": "SOUP_BOOTSTRAP=1 tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "lint": "echo 'ok'",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
     "test": "echo 'no tests'",
     "prisma:generate": "prisma generate --schema=./src/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --name init --schema=./src/prisma/schema.prisma"

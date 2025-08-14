@@ -8,6 +8,12 @@
     "skipLibCheck": true,
     "strict": true,
     "outDir": "dist",
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@soup/common": ["packages/common/src/index.ts"],
+      "@soup/common/*": ["packages/common/src/*"],
+      "@soup/agents": ["packages/agents/src/index.ts"],
+      "@soup/agents/*": ["packages/agents/src/*"]
+    }
   }
 }
