@@ -31,6 +31,8 @@ module.exports = [
         require: 'readonly',
         module: 'readonly',
         exports: 'readonly',
+        // Node.js 18+ globals
+        fetch: 'readonly',
       },
     },
     plugins: {

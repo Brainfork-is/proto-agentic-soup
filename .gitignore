@@ -42,6 +42,9 @@ Thumbs.db
 *.db
 *.db-journal
 
+# Run outputs and metrics
+apps/soup-runner/runs/
+
 # Logs & temp
 logs/
 log/

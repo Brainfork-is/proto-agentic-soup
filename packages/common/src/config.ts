@@ -15,13 +15,15 @@ const browserSchema = z.object({
   ALLOWED_HOSTS: z
     .string()
     .optional()
-    .default('localhost,127.0.0.1')
+    .default('localhost,127.0.0.1,*.local,*.example.com,httpbin.org,jsonplaceholder.typicode.com')
     .transform((s) =>
       s
         .split(',')
         .map((x) => x.trim())
         .filter(Boolean)
     ),
+  MCP_KNOWLEDGE_SERVER: z.string().optional().default(''),
+  MCP_BEARER_TOKEN: z.string().optional().default(''),
 });
 
 const siteSchema = z.object({
@@ -41,6 +43,8 @@ const runnerSchema = z.object({
     .optional()
     .default('0')
     .transform((v) => v === '1'),
+  MCP_KNOWLEDGE_SERVER: z.string().optional().default(''),
+  MCP_BEARER_TOKEN: z.string().optional().default(''),
 });
 
 export type CommonConfig = z.infer<typeof commonSchema>;
