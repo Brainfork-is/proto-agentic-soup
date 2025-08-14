@@ -3,11 +3,22 @@
   "private": true,
   "version": "0.2.0",
   "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "volta": {
+    "node": "20.15.1",
+    "pnpm": "9.0.0"
+  },
   "scripts": {
+    "preinstall": "corepack enable || true && corepack prepare pnpm@9.0.0 --activate || true",
     "build": "pnpm -r build",
     "dev": "concurrently -n soup,browser,site \"pnpm --filter @soup/soup-runner dev\" \"pnpm --filter @soup/browser-gateway dev\" \"pnpm --filter @soup/site-kb dev\"",
     "start": "concurrently -n soup,browser,site \"pnpm --filter @soup/soup-runner start\" \"pnpm --filter @soup/browser-gateway start\" \"pnpm --filter @soup/site-kb start\"",
     "lint": "pnpm -r lint",
+    "lint:fix": "pnpm -r lint:fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "pnpm -r test",
     "prisma:generate": "pnpm --filter @soup/soup-runner prisma:generate",
     "prisma:migrate": "pnpm --filter @soup/soup-runner prisma:migrate",
@@ -16,6 +27,11 @@
   },
   "devDependencies": {
     "concurrently": "^9.0.1",
-    "@types/node": "^20.14.9"
+    "@types/node": "^20.14.9",
+    "eslint": "^9.8.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3"
   }
 }

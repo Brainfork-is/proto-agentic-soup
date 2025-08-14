@@ -169,6 +169,10 @@ async function main() {
     .option('id', { type: 'string', describe: 'Ticket id like M-1' })
     .option('generate', { type: 'boolean', default: true, describe: 'Generate Codex prompt' })
     .option('run-codex', { type: 'string', describe: 'Command template to run Codex CLI, e.g., "codex --prompt {file}"' })
+    .option('auto', { type: 'boolean', default: true, describe: 'Auto-run Codex if available (use --no-auto to disable)' })
+    .option('codex-timeout', { type: 'number', default: 600, describe: 'Timeout for Codex run in seconds' })
+    .option('print-prompt', { type: 'boolean', default: true, describe: 'Print generated prompt content to stdout' })
+    .option('open-prompt', { type: 'boolean', default: false, describe: 'Open prompt file in default editor (macOS/Linux)' })
     .option('check-off', { type: 'boolean', default: false, describe: 'Mark the ticket as completed in docs/tickets.md' })
     .option('commit', { type: 'boolean', default: false, describe: 'Create branch and commit changes' })
     .option('create-pr', { type: 'boolean', default: false, describe: 'Create PR via GitHub CLI if available' })
@@ -193,14 +197,74 @@ async function main() {
     const prompt = generatePrompt(ticket, concept, spec);
     promptFile = writePrompt(ticket, prompt);
     console.log(`Prompt written to ${path.relative(repoRoot, promptFile)}`);
+    if (argv['print-prompt']) {
+      try {
+        const content = fs.readFileSync(promptFile, 'utf8');
+        const divider = '-'.repeat(80);
+        console.log(divider);
+        console.log(`# Prompt Preview: ${path.relative(repoRoot, promptFile)}`);
+        console.log(divider);
+        console.log(content);
+        console.log(divider);
+      } catch (e) {
+        console.error('[build-agent] Failed to read prompt for printing:', e instanceof Error ? e.message : e);
+      }
+    }
+    if (argv['open-prompt']) {
+      try {
+        // macOS: open, Linux: xdg-open; ignore failures if not present
+        try { execSync(`open ${JSON.stringify(promptFile)}`, { stdio: 'ignore' }); }
+        catch { execSync(`xdg-open ${JSON.stringify(promptFile)}`, { stdio: 'ignore' }); }
+      } catch {}
+    }
   }
 
-  if (argv["run-codex"] && promptFile) {
-    const cmd = String(argv["run-codex"]).replace('{file}', promptFile);
-    try {
-      run(cmd);
-    } catch (e) {
-      console.error('Codex CLI invocation failed:', e);
+  // Optionally invoke Codex CLI
+  if (promptFile) {
+    const timeoutMs = Math.max(1, Number(argv['codex-timeout'] || 600)) * 1000;
+
+    const replaceFile = (template: string) => {
+      const quoted = JSON.stringify(promptFile);
+      return template.includes('{file}') ? template.replace('{file}', quoted) : `${template} ${quoted}`;
+    };
+
+    const tryRun = (template: string) => {
+      const cmd = replaceFile(template);
+      console.log(`[build-agent] Running: ${cmd}`);
+      try {
+        execSync(cmd, { stdio: 'inherit', cwd: repoRoot, timeout: timeoutMs });
+        return true;
+      } catch (e) {
+        console.error('[build-agent] Codex CLI invocation failed or timed out:', e instanceof Error ? e.message : e);
+        return false;
+      }
+    };
+
+    const detectCodex = (): string | undefined => {
+      // Allow override via env
+      const envCmd = process.env.CODEX_CLI;
+      if (envCmd && envCmd.trim()) return envCmd.trim();
+      try {
+        execSync('command -v codex', { stdio: 'ignore' });
+        // Default to positional prompt argument
+        return 'codex {file}';
+      } catch {}
+      try {
+        execSync('codex --version', { stdio: 'ignore' });
+        return 'codex {file}';
+      } catch {}
+      return undefined;
+    };
+
+    if (argv['run-codex']) {
+      tryRun(String(argv['run-codex']));
+    } else if (argv.auto !== false) {
+      const auto = detectCodex();
+      if (auto) {
+        tryRun(auto);
+      } else {
+        console.log('[build-agent] Codex CLI not found in PATH (or CODEX_CLI not set); skipping auto-run.');
+      }
     }
   }
 
