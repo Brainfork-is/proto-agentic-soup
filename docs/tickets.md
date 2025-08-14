@@ -33,7 +33,7 @@
 
 # Epic P — Agent Runtime
 
-- [ ] **[P-1] Agent loop (mock planner)** — L **Desc:** Baseline planner (heuristics); actor executes tool calls; reflector adjusts plan; heartbeat. **AC:** Agent completes at least one job in each category using heuristics.
+- [x] **[P-1] Agent loop (mock planner)** — L **Desc:** Baseline planner (heuristics); actor executes tool calls; reflector adjusts plan; heartbeat. **AC:** Agent completes at least one job in each category using heuristics.
 - [x] **[P-2] Tools: browser adapter** — S **Desc:** browserRun({ url, steps[] }) wrapper to /run. **AC:** Returns lastText and contentLength to the actor.
 - [ ] **[P-3] Tools: retrieval‑local** — M **Desc:** Load site content into in‑memory corpus; simple keyword search; return snippet. **AC:** Query for “PGVector” returns section mentioning joins.
 - [x] **[P-4] Tools: stringKit & calc** — S **Desc:** Summarize/extract/classify prompt wrappers; arithmetic eval. **AC:** Unit tests for each helper.
@@ -51,7 +51,7 @@
 
 # Epic R — Metrics, Exports & Dashboard
 
-- [ ] **[R-1] Inequality metrics** — M **Desc:** Compute Gini and top‑k share (k=5,10) over rolling 1h/2h windows. **AC:** CSV written runs/<ts>/metrics/inequality.csv with timestamps.
+- [x] **[R-1] Inequality metrics** — M **Desc:** Compute Gini and top‑k share (k=5,10) over rolling 1h/2h windows. **AC:** CSV written runs/<ts>/metrics/inequality.csv with timestamps.
 - [ ] **[R-2] Network metrics** — L **Desc:** Track message edges; compute degree & betweenness centrality (approx) per hour window. **AC:** CSV network.csv with per‑agent metrics.
 - [ ] **[R-3] Throughput & reliability** — S **Desc:** Jobs/min, success rate, mean TTC; failure modes. **AC:** throughput.csv and reliability.csv exported.
 - [ ] **[R-4] Minimal dashboard** — M **Desc:** Static page served by soup-runner showing 3 charts (inequality, throughput, centrality). **AC:** Loads without backend errors; updates on refresh.
