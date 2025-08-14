@@ -20,16 +20,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20 with Corepack
+      - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
 
       - name: Enable Corepack and prepare pnpm
         run: |
           corepack enable
           corepack prepare pnpm@9.0.0 --activate
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
         run: pnpm i
@@ -39,6 +51,9 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+      - name: Generate Prisma client
+        run: pnpm prisma:generate
 
       - name: Build workspace
         run: pnpm -r build
