@@ -1,24 +1,32 @@
 import { JobData } from '@soup/common';
 import { Tools } from './tools';
 import { MockPlanner, ExecutionResult } from './mockPlanner';
+import { LLMPlanner } from './llmPlanner';
+import { memoryManager } from './agentMemory';
+
+// Re-export for external use
+export { jobGenerator } from './jobGenerator';
+export { memoryManager } from './agentMemory';
 
 export class SimpleAgent {
   id: string;
   temperature: number;
   tools: string[];
-  private planner: MockPlanner;
+  private llmPlanner: LLMPlanner;
+  private mockPlanner: MockPlanner;
 
   constructor(id: string, t: number, tools: string[]) {
     this.id = id;
     this.temperature = t;
     this.tools = tools;
-    this.planner = new MockPlanner(t, tools);
+    this.llmPlanner = new LLMPlanner(t, tools, id);
+    this.mockPlanner = new MockPlanner(t, tools);
   }
 
   async handle(job: JobData) {
     try {
-      // Phase 1: Planning
-      const plan = this.planner.plan(job.category, job.payload);
+      // Phase 1: Planning (try LLM first, fallback to mock)
+      const plan = await this.llmPlanner.plan(job.category, job.payload);
 
       // Phase 2: Acting (execute each step)
       const executionResults: ExecutionResult[] = [];
@@ -94,8 +102,20 @@ export class SimpleAgent {
         }
       }
 
-      // Phase 3: Reflection
-      const reflection = this.planner.reflect(plan, executionResults);
+      // Phase 3: Reflection (try LLM first, fallback to mock)
+      const reflection = await this.llmPlanner.reflect(plan, executionResults);
+
+      // Store experience in memory
+      const memory = memoryManager.getMemory(this.id);
+      memory.remember({
+        category: job.category,
+        payload: job.payload,
+        success: reflection.success,
+        artifact: reflection.finalResult,
+        stepsUsed: totalStepsUsed,
+        planUsed: plan.goal,
+        adjustments: reflection.adjustments,
+      });
 
       return {
         ok: reflection.success,
