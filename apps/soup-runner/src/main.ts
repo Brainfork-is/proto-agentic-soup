@@ -42,7 +42,8 @@ app.get('/leaderboard', async () => {
 });
 
 // Dashboard routes
-app.get('/dashboard', async () => {
+app.get('/dashboard', async (request, reply) => {
+  reply.type('text/html');
   return `
 <!DOCTYPE html>
 <html lang="en">
