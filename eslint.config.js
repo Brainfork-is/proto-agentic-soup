@@ -28,6 +28,7 @@ module.exports = [
         global: 'readonly',
         __dirname: 'readonly',
         __filename: 'readonly',
+        AbortController: 'readonly',
       },
     },
     plugins: {
