@@ -6,7 +6,7 @@ import IORedis from 'ioredis';
 import { nowIso, gini, topKShare, loadRunnerConfig } from '@soup/common';
 import fs from 'fs-extra';
 import path from 'path';
-import { SimpleAgent } from '@soup/agents';
+import { SimpleAgent, jobGenerator } from '@soup/agents';
 
 const cfg = loadRunnerConfig();
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
@@ -48,62 +48,127 @@ async function seedIfEmpty() {
     fs.readFileSync(path.join(__dirname, '../../../seeds', 'archetypes.json'), 'utf8')
   );
 
-  for (const a of seeds.agents) {
-    await prisma.blueprint.create({
-      data: {
-        version: 1,
-        llmModel: a.llmModel,
-        temperature: a.temperature,
-        tools: (a.tools || []).join(','),
-        coopThreshold: a.coopThreshold,
-        minBalance: 30,
-        mutationRate: 0.15,
-        maxOffspring: 2,
-      },
-    });
+  console.log(`[seed] Creating 60 agents from ${seeds.agents.length} archetypes...`);
 
-    const bp = await prisma.blueprint.findFirst({ orderBy: { createdAt: 'desc' } });
-    await prisma.agentState.create({
-      data: {
-        blueprintId: bp!.id,
-        balance: 10,
-        reputation: 0.5,
-        attempts: 0,
-        wins: 0,
-        meanTtcSec: 0,
-        alive: true,
-      },
-    });
+  // Create 10 variants for each of the 6 archetypes (60 total agents)
+  for (const archetype of seeds.agents) {
+    for (let variant = 0; variant < 10; variant++) {
+      // Create mutations for each variant
+      const mutatedTemperature = mutateTemperature(archetype.temperature, variant);
+      const mutatedTools = mutateTools(archetype.tools, variant);
+      const mutatedCoopThreshold = mutateCoopThreshold(archetype.coopThreshold, variant);
+
+      // Create blueprint for this variant
+      const blueprint = await prisma.blueprint.create({
+        data: {
+          version: 1,
+          llmModel: archetype.llmModel,
+          temperature: mutatedTemperature,
+          tools: mutatedTools.join(','),
+          coopThreshold: mutatedCoopThreshold,
+          minBalance: 30,
+          mutationRate: 0.15,
+          maxOffspring: 2,
+        },
+      });
+
+      // Create agent state for this variant
+      await prisma.agentState.create({
+        data: {
+          blueprintId: blueprint.id,
+          balance: 10 + Math.floor(Math.random() * 5), // 10-14 starting balance variance
+          reputation: 0.4 + Math.random() * 0.2, // 0.4-0.6 starting reputation
+          attempts: 0,
+          wins: 0,
+          meanTtcSec: 0,
+          alive: true,
+        },
+      });
+
+      console.log(
+        `[seed] Created ${archetype.id}_v${variant}: temp=${mutatedTemperature.toFixed(2)}, tools=[${mutatedTools.join(',')}], coop=${mutatedCoopThreshold.toFixed(2)}`
+      );
+    }
   }
+
+  console.log('[seed] Seeding complete: 60 agents created');
+}
+
+// Mutation functions for creating variants
+function mutateTemperature(baseTemp: number, variant: number): number {
+  // Create temperature variants: 0.1, 0.2, 0.3, 0.4, 0.5, then some repeats
+  const temps = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+  return temps[variant] || baseTemp;
+}
+
+function mutateTools(baseTools: string[], variant: number): string[] {
+  const allTools = ['browser', 'retrieval', 'stringKit', 'calc'];
+  const tools = [...baseTools];
+
+  // Apply different tool mutations based on variant
+  switch (variant % 4) {
+    case 0: // Original tools
+      break;
+    case 1: {
+      // Add a random tool if not present
+      const addTool = allTools[Math.floor(Math.random() * allTools.length)];
+      if (!tools.includes(addTool)) tools.push(addTool);
+      break;
+    }
+    case 2: {
+      // Remove a random tool if more than 1 tool
+      if (tools.length > 1) {
+        const removeIndex = Math.floor(Math.random() * tools.length);
+        tools.splice(removeIndex, 1);
+      }
+      break;
+    }
+    case 3: {
+      // Swap a tool
+      if (tools.length > 0) {
+        const swapIndex = Math.floor(Math.random() * tools.length);
+        const newTool = allTools[Math.floor(Math.random() * allTools.length)];
+        tools[swapIndex] = newTool;
+      }
+      break;
+    }
+  }
+
+  return [...new Set(tools)]; // Remove duplicates
+}
+
+function mutateCoopThreshold(baseThreshold: number, variant: number): number {
+  // Create cooperation threshold variants
+  const thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+  return thresholds[variant] || baseThreshold;
 }
 
 async function generateJobs() {
   for (let i = 0; i < JOBS_PER_MIN; i++) {
-    const cats = ['web_research', 'summarize', 'classify', 'math'] as const;
-    const category = cats[Math.floor(Math.random() * cats.length)];
+    try {
+      const job = await jobGenerator.generateJob();
 
-    const payload =
-      category === 'web_research'
-        ? {
-            url: 'http://localhost:3200/docs/vector-db.html',
-            question: 'Name one advantage of PGVector.',
-          }
-        : category === 'summarize'
-          ? { text: 'RAG fetches documents to ground responses in facts.', maxWords: 12 }
-          : category === 'classify'
-            ? {
-                text: 'Milvus supports sharding and replication.',
-                labels: ['DB', 'Not-DB', 'Unknown'],
-                answer: 'DB',
-              }
-            : { expr: '2 + 2 * 3' };
+      await jobQueue.add('job', {
+        category: job.category,
+        payload: job.payload,
+        payout: job.payout,
+        deadlineS: job.deadlineS,
+      } as any);
 
-    await jobQueue.add('job', {
-      category,
-      payload,
-      payout: 5 + Math.floor(Math.random() * 6),
-      deadlineS: 60,
-    } as any);
+      console.log(
+        `[jobs] Generated ${job.category} job: ${JSON.stringify(job.payload).substring(0, 100)}...`
+      );
+    } catch (error) {
+      console.error('[jobs] Failed to generate job:', error);
+
+      // Fallback to a simple static job
+      await jobQueue.add('job', {
+        category: 'math',
+        payload: { expr: '1 + 1' },
+        payout: 5,
+        deadlineS: 60,
+      } as any);
+    }
   }
 }
 
