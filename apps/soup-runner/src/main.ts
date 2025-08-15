@@ -41,6 +41,411 @@ app.get('/leaderboard', async () => {
   return { rows };
 });
 
+// Dashboard routes
+app.get('/dashboard', async (request, reply) => {
+  reply.type('text/html');
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agentic Soup Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+        .header { background: #2d3748; color: white; padding: 1rem 2rem; }
+        .container { padding: 2rem; max-width: 1400px; margin: 0 auto; }
+        .grid { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
+        .card { background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .chart-container { height: 300px; position: relative; }
+        .metric { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #eee; }
+        .metric:last-child { border-bottom: none; }
+        .metric-value { font-weight: bold; color: #2d3748; }
+        .agent-list { max-height: 300px; overflow-y: auto; }
+        .agent-item { padding: 0.75rem; border: 1px solid #e2e8f0; margin-bottom: 0.5rem; border-radius: 4px; }
+        .agent-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+        .agent-status.alive { background: #48bb78; }
+        .agent-status.dead { background: #f56565; }
+        .activity-log { max-height: 400px; overflow-y: auto; font-size: 0.875rem; }
+        .activity-item { padding: 0.5rem; border-bottom: 1px solid #eee; }
+        .timestamp { color: #718096; font-size: 0.75rem; }
+        .refresh-btn { background: #4299e1; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }
+        .refresh-btn:hover { background: #3182ce; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🍲 Agentic Soup Dashboard</h1>
+        <button class="refresh-btn" onclick="refreshAll()">Refresh All</button>
+    </div>
+    
+    <div class="container">
+        <div class="grid">
+            <div class="card">
+                <h3>System Health</h3>
+                <div id="system-health"></div>
+            </div>
+            
+            <div class="card">
+                <h3>Inequality Over Time (Gini Coefficient)</h3>
+                <div class="chart-container">
+                    <canvas id="inequality-chart"></canvas>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>Job Throughput</h3>
+                <div class="chart-container">
+                    <canvas id="throughput-chart"></canvas>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>Agent Network Centrality</h3>
+                <div class="chart-container">
+                    <canvas id="centrality-chart"></canvas>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>Active Agents</h3>
+                <div id="agents-list" class="agent-list"></div>
+            </div>
+            
+            <div class="card">
+                <h3>Recent Activity (Last 100)</h3>
+                <div id="activity-log" class="activity-log"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let charts = {};
+        
+        async function fetchData(endpoint) {
+            const response = await fetch(endpoint);
+            return response.json();
+        }
+        
+        async function refreshSystemHealth() {
+            const data = await fetchData('/api/system-health');
+            const container = document.getElementById('system-health');
+            container.innerHTML = Object.entries(data).map(([key, value]) => 
+                '<div class="metric">' +
+                    '<span>' + key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()) + '</span>' +
+                    '<span class="metric-value">' + (typeof value === 'number' ? value.toLocaleString() : value) + '</span>' +
+                '</div>'
+            ).join('');
+        }
+        
+        async function refreshInequalityChart() {
+            const data = await fetchData('/api/metrics/inequality');
+            if (charts.inequality) charts.inequality.destroy();
+            
+            const ctx = document.getElementById('inequality-chart').getContext('2d');
+            charts.inequality = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => new Date(d.timestamp).toLocaleTimeString()),
+                    datasets: [{
+                        label: 'Gini Coefficient',
+                        data: data.map(d => d.gini),
+                        borderColor: '#4299e1',
+                        fill: false
+                    }, {
+                        label: 'Top 5 Share',
+                        data: data.map(d => d.top5share),
+                        borderColor: '#ed8936',
+                        fill: false
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 1 } } }
+            });
+        }
+        
+        async function refreshThroughputChart() {
+            const data = await fetchData('/api/metrics/throughput');
+            if (charts.throughput) charts.throughput.destroy();
+            
+            const ctx = document.getElementById('throughput-chart').getContext('2d');
+            charts.throughput = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => new Date(d.timestamp).toLocaleTimeString()),
+                    datasets: [{
+                        label: 'Jobs Completed/Hour',
+                        data: data.map(d => d.completedJobs),
+                        borderColor: '#48bb78',
+                        fill: true,
+                        backgroundColor: 'rgba(72, 187, 120, 0.1)'
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+            });
+        }
+        
+        async function refreshCentralityChart() {
+            const data = await fetchData('/api/metrics/centrality');
+            if (charts.centrality) charts.centrality.destroy();
+            
+            const ctx = document.getElementById('centrality-chart').getContext('2d');
+            charts.centrality = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Agent Centrality',
+                        data: data.map(d => ({ x: d.betweenness, y: d.closeness, r: Math.sqrt(d.degree) * 3 })),
+                        backgroundColor: 'rgba(159, 122, 234, 0.6)'
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    scales: { 
+                        x: { title: { display: true, text: 'Betweenness Centrality' } },
+                        y: { title: { display: true, text: 'Closeness Centrality' } }
+                    }
+                }
+            });
+        }
+        
+        async function refreshAgentsList() {
+            const data = await fetchData('/api/agents');
+            const container = document.getElementById('agents-list');
+            container.innerHTML = data.map(agent => 
+                '<div class="agent-item">' +
+                    '<span class="agent-status ' + (agent.alive ? 'alive' : 'dead') + '"></span>' +
+                    '<strong>' + agent.id.substring(0, 8) + '...</strong><br>' +
+                    'Balance: ' + agent.balance + ' | Wins: ' + agent.wins + '/' + agent.attempts + ' | Temp: ' + agent.temperature + '<br>' +
+                    'Tools: ' + agent.tools + ' | Model: ' + agent.llmModel +
+                '</div>'
+            ).join('');
+        }
+        
+        async function refreshActivityLog() {
+            const data = await fetchData('/api/activity');
+            const container = document.getElementById('activity-log');
+            container.innerHTML = data.map(item => 
+                '<div class="activity-item">' +
+                    '<div class="timestamp">' + new Date(item.timestamp).toLocaleString() + '</div>' +
+                    '<div>' + item.action + '</div>' +
+                '</div>'
+            ).join('');
+        }
+        
+        async function refreshAll() {
+            await Promise.all([
+                refreshSystemHealth(),
+                refreshInequalityChart(),
+                refreshThroughputChart(), 
+                refreshCentralityChart(),
+                refreshAgentsList(),
+                refreshActivityLog()
+            ]);
+        }
+        
+        // Initial load
+        refreshAll();
+        
+        // Auto-refresh every 30 seconds
+        setInterval(refreshAll, 30000);
+    </script>
+</body>
+</html>
+`;
+});
+
+// API endpoints for dashboard data
+app.get('/api/system-health', async () => {
+  if (BOOTSTRAP) return { mode: 'bootstrap' };
+
+  const agents = await prisma.agentState.findMany();
+  const activeAgents = agents.filter((a: any) => a.alive);
+  const jobs = await prisma.job.count();
+  const totalTransactions = await prisma.ledger.count();
+  const recentTransactions = await prisma.ledger.count({
+    where: { ts: { gte: new Date(Date.now() - 3600000) } }, // last hour
+  });
+
+  return {
+    totalAgents: agents.length,
+    activeAgents: activeAgents.length,
+    totalJobs: jobs,
+    totalTransactions,
+    recentTransactions,
+    avgBalance: Math.round(
+      activeAgents.reduce((sum: number, a: any) => sum + a.balance, 0) / activeAgents.length || 0
+    ),
+    successRate:
+      activeAgents.length > 0
+        ? Math.round(
+            (activeAgents.reduce((sum: number, a: any) => sum + a.wins, 0) /
+              activeAgents.reduce((sum: number, a: any) => sum + a.attempts, 0) || 0) * 100
+          ) + '%'
+        : '0%',
+  };
+});
+
+app.get('/api/metrics/inequality', async () => {
+  if (BOOTSTRAP) return [];
+
+  try {
+    const filePath = path.join(METRICS_DIR, 'inequality.csv');
+    if (!fs.existsSync(filePath)) return [];
+
+    const content = fs.readFileSync(filePath, 'utf8');
+    const lines = content.trim().split('\n').slice(1); // Skip header
+
+    return lines.slice(-50).map((line) => {
+      // Last 50 data points
+      const [timestamp, gini, top5share] = line.split(',');
+      return {
+        timestamp,
+        gini: parseFloat(gini),
+        top5share: parseFloat(top5share),
+      };
+    });
+  } catch (error) {
+    return [];
+  }
+});
+
+app.get('/api/metrics/throughput', async () => {
+  if (BOOTSTRAP) return [];
+
+  const hourlyStats = await prisma.$queryRaw`
+    SELECT 
+      datetime(ts, 'start of hour') as hour,
+      COUNT(*) as count
+    FROM Ledger 
+    WHERE reason = 'payout' 
+      AND ts >= datetime('now', '-24 hours')
+    GROUP BY hour
+    ORDER BY hour
+  `;
+
+  return (hourlyStats as any[]).map((stat) => ({
+    timestamp: stat.hour,
+    completedJobs: stat.count,
+  }));
+});
+
+app.get('/api/metrics/centrality', async () => {
+  if (BOOTSTRAP) return [];
+
+  // Simple centrality calculation based on interactions
+  const edges = await prisma.edge.findMany({
+    where: { ts: { gte: new Date(Date.now() - 86400000) } }, // last 24 hours
+  });
+
+  const nodeDegrees: Record<string, number> = {};
+  const nodeConnections: Record<string, Set<string>> = {};
+
+  edges.forEach((edge: any) => {
+    nodeDegrees[edge.fromId] = (nodeDegrees[edge.fromId] || 0) + 1;
+    nodeDegrees[edge.toId] = (nodeDegrees[edge.toId] || 0) + 1;
+
+    if (!nodeConnections[edge.fromId]) nodeConnections[edge.fromId] = new Set();
+    if (!nodeConnections[edge.toId]) nodeConnections[edge.toId] = new Set();
+
+    nodeConnections[edge.fromId].add(edge.toId);
+    nodeConnections[edge.toId].add(edge.fromId);
+  });
+
+  return Object.entries(nodeDegrees)
+    .slice(0, 20)
+    .map(([nodeId, degree]) => ({
+      nodeId,
+      degree,
+      betweenness: degree / Object.keys(nodeDegrees).length, // Simplified
+      closeness: nodeConnections[nodeId]?.size || 0 / Object.keys(nodeDegrees).length,
+    }));
+});
+
+app.get('/api/agents', async () => {
+  if (BOOTSTRAP) return [];
+
+  const agents = await prisma.agentState.findMany({
+    orderBy: { balance: 'desc' },
+  });
+
+  const blueprints = await prisma.blueprint.findMany();
+  const blueprintMap = new Map(blueprints.map((bp: any) => [bp.id, bp]));
+
+  return agents.map((agent: any) => {
+    const blueprint: any = blueprintMap.get(agent.blueprintId);
+    return {
+      id: agent.id,
+      alive: agent.alive,
+      balance: agent.balance,
+      wins: agent.wins,
+      attempts: agent.attempts,
+      reputation: agent.reputation,
+      meanTtcSec: agent.meanTtcSec,
+      temperature: blueprint?.temperature || 0,
+      tools: blueprint?.tools || '',
+      llmModel: blueprint?.llmModel || 'unknown',
+    };
+  });
+});
+
+app.get('/api/activity', async () => {
+  if (BOOTSTRAP) return [];
+
+  // Get recent activities from multiple sources
+  const recentLedger = await prisma.ledger.findMany({
+    take: 50,
+    orderBy: { ts: 'desc' },
+  });
+
+  const recentJobs = await prisma.job.findMany({
+    take: 25,
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const recentEdges = await prisma.edge.findMany({
+    take: 25,
+    orderBy: { ts: 'desc' },
+  });
+
+  const activities = [
+    ...recentLedger.map((l: any) => ({
+      timestamp: l.ts,
+      action:
+        'Agent ' +
+        l.agentId.substring(0, 8) +
+        '... ' +
+        (l.delta > 0 ? 'earned' : 'spent') +
+        ' ' +
+        Math.abs(l.delta) +
+        ' (' +
+        l.reason +
+        ')',
+    })),
+    ...recentJobs.map((j: any) => ({
+      timestamp: j.createdAt,
+      action: 'New ' + j.category + ' job created (payout: ' + j.payout + ')',
+    })),
+    ...recentEdges.map((e: any) => ({
+      timestamp: e.ts,
+      action:
+        'Interaction: ' +
+        e.fromId.substring(0, 8) +
+        '... → ' +
+        e.toId.substring(0, 8) +
+        '... (' +
+        e.topic +
+        ')',
+    })),
+  ];
+
+  return activities
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 100);
+});
+
 let jobQueue: any;
 
 async function seedIfEmpty() {
@@ -353,13 +758,17 @@ async function main() {
   fs.writeFileSync(path.join(METRICS_DIR, 'inequality.csv'), 'ts,gini,top5share\n');
   jobQueue = new Queue('jobs', { connection: redis });
   await seedIfEmpty();
+
+  // Start HTTP server first so dashboard is immediately available
+  await app.listen({ port: cfg.SOUP_RUNNER_PORT, host: '0.0.0.0' });
+  console.log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT}`);
+
+  // Then start background processes (job generation, agents, etc.)
+  console.log('[soup-runner] Starting background processes...');
   setInterval(generateJobs, 60_000);
-  await generateJobs();
+  generateJobs().catch(console.error); // Don't await, run in background
   await startAgentWorkers();
   setInterval(() => epochTick().catch(console.error), EPOCH_MINUTES * 60_000);
-  app
-    .listen({ port: cfg.SOUP_RUNNER_PORT, host: '0.0.0.0' })
-    .then(() => console.log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT}`));
 }
 
 main().catch((e) => {
