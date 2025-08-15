@@ -176,10 +176,15 @@ export class LocalLLMClient {
 
     try {
       const healthUrl = this.endpoint.replace(/\/[^/]+$/, '/health');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(healthUrl, {
         method: 'GET',
-        timeout: 5000,
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         console.log('[LocalLLM] Health check passed');
@@ -188,10 +193,15 @@ export class LocalLLMClient {
     } catch (error) {
       // Try alternative health endpoints
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
         const response = await fetch(this.endpoint.replace(/\/[^/]+$/, '/'), {
           method: 'GET',
-          timeout: 5000,
+          signal: controller.signal,
         });
+        
+        clearTimeout(timeoutId);
 
         if (response.ok || response.status === 404) {
           console.log('[LocalLLM] Server is reachable');
