@@ -127,13 +127,24 @@ export class LocalLLMClient {
         stream: false,
       };
 
+      console.log(
+        `[LocalLLM] Sending request to ${this.modelPath} with prompt length: ${request.prompt.length}`
+      );
+
+      // Use longer timeout for large models (5 minutes)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
+
       const response = await fetch(this.endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const error = await response.text();
