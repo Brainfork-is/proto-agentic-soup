@@ -9,11 +9,13 @@
     "dev": "tsc -w -p tsconfig.json",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
-    "test": "echo 'no tests'"
+    "test": "echo 'no tests'",
+    "prepare": "husky"
   },
   "dependencies": {
     "@soup/common": "workspace:*",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "google-auth-library": "^9.0.0"
   },
   "devDependencies": {
     "typescript": "^5.5.0"
