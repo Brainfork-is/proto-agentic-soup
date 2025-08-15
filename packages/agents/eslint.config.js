@@ -33,6 +33,8 @@ module.exports = [
         exports: 'readonly',
         // Node.js 18+ globals
         fetch: 'readonly',
+        AbortController: 'readonly',
+        AbortSignal: 'readonly',
       },
     },
     plugins: {
