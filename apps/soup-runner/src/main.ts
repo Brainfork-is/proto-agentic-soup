@@ -6,9 +6,12 @@ import IORedis from 'ioredis';
 import { nowIso, gini, topKShare, loadRunnerConfig } from '@soup/common';
 import fs from 'fs-extra';
 import path from 'path';
-import { SimpleAgent, jobGenerator } from '@soup/agents';
 
+// Load config first to ensure environment variables are available for agents
 const cfg = loadRunnerConfig();
+
+// Import agents after config is loaded to ensure env vars are available
+import { SimpleAgent, jobGenerator } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
 const app = Fastify();

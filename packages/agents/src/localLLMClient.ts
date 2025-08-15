@@ -186,11 +186,12 @@ export class LocalLLMClient {
     }
 
     try {
-      const healthUrl = this.endpoint.replace(/\/[^/]+$/, '/health');
+      // For Ollama, try the root endpoint first as it returns "Ollama is running"
+      const rootUrl = this.endpoint.replace(/\/[^/]+$/, '/');
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      const response = await fetch(healthUrl, {
+      const response = await fetch(rootUrl, {
         method: 'GET',
         signal: controller.signal,
       });
@@ -198,29 +199,14 @@ export class LocalLLMClient {
       clearTimeout(timeoutId);
 
       if (response.ok) {
-        console.log('[LocalLLM] Health check passed');
-        return true;
-      }
-    } catch (error) {
-      // Try alternative health endpoints
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-        const response = await fetch(this.endpoint.replace(/\/[^/]+$/, '/'), {
-          method: 'GET',
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (response.ok || response.status === 404) {
-          console.log('[LocalLLM] Server is reachable');
+        const text = await response.text();
+        if (text.includes('Ollama is running') || text.includes('running')) {
+          console.log('[LocalLLM] Health check passed - Ollama is running');
           return true;
         }
-      } catch (innerError) {
-        console.log('[LocalLLM] Health check failed - server not reachable');
       }
+    } catch (error) {
+      console.log('[LocalLLM] Health check failed - server not reachable:', error);
     }
 
     return false;
