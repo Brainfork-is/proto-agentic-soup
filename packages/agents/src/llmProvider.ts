@@ -3,8 +3,8 @@
  * Supports Vertex AI, local models, and OpenAI with intelligent fallback
  */
 
-import { vertexClient, LLMResponse as VertexResponse } from './vertexClient';
-import { localLLMClient, LocalLLMResponse } from './localLLMClient';
+import { vertexClient } from './vertexClient';
+import { localLLMClient } from './localLLMClient';
 
 export type LLMProviderType = 'vertex' | 'local' | 'auto';
 

@@ -27,15 +27,27 @@
     "prisma:generate": "pnpm --filter @soup/soup-runner prisma:generate",
     "prisma:migrate": "pnpm --filter @soup/soup-runner prisma:migrate",
     "build-agent": "pnpm --filter @soup/build-agent start",
-    "build-agent:dev": "pnpm --filter @soup/build-agent dev"
+    "build-agent:dev": "pnpm --filter @soup/build-agent dev",
+    "prepare": "husky"
   },
   "devDependencies": {
-    "concurrently": "^9.0.1",
     "@types/node": "^20.14.9",
-    "eslint": "^9.8.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
+    "concurrently": "^9.0.1",
+    "eslint": "^9.8.0",
     "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.5",
     "prettier": "^3.3.3"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{js,jsx,json}": [
+      "prettier --write"
+    ]
   }
 }

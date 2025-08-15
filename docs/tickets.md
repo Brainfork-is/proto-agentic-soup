@@ -39,7 +39,7 @@
 - [x] **[P-4] Tools: stringKit & calc** — S **Desc:** Summarize/extract/classify prompt wrappers; arithmetic eval. **AC:** Unit tests for each helper.
 - [ ] **[P-5] Memory stub** — S **Desc:** In‑process KV for last K jobs; later swap to SQLite table. **AC:** remember/recall works across ticks.
 - [x] **[P-6] Archetype seeds (6 types × 10 variants)** — M **Desc:** JSON blueprints differing in temperature, tools, coop threshold, planner style. **AC:** Loader spawns 60 agents from seeds.
-- [ ] **[P-7] Optional LLM planner** — M **Desc:** Switchable planner using OpenAI when keys present; token budget aware. **AC:** Environment toggle; fallback to mock when rate‑limited.
+- [ ] **[P-7] Optional LLM planner** — M **Desc:** Switchable planner using Google Vertex AI when keys present; token budget aware. **AC:** Environment toggle; fallback to mock when rate‑limited.
 
 # Epic Q — Orchestrator & Evolution
 

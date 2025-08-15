@@ -175,10 +175,10 @@ export class LocalLLMClient {
     }
 
     try {
-      const healthUrl = this.endpoint.replace(/\/[^\/]+$/, '/health');
+      const healthUrl = this.endpoint.replace(/\/[^/]+$/, '/health');
       const response = await fetch(healthUrl, {
         method: 'GET',
-        signal: AbortSignal.timeout(5000),
+        timeout: 5000,
       });
 
       if (response.ok) {
@@ -188,9 +188,9 @@ export class LocalLLMClient {
     } catch (error) {
       // Try alternative health endpoints
       try {
-        const response = await fetch(this.endpoint.replace(/\/[^\/]+$/, '/'), {
+        const response = await fetch(this.endpoint.replace(/\/[^/]+$/, '/'), {
           method: 'GET',
-          signal: AbortSignal.timeout(5000),
+          timeout: 5000,
         });
 
         if (response.ok || response.status === 404) {
