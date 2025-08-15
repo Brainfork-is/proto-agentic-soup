@@ -757,13 +757,17 @@ async function main() {
   fs.writeFileSync(path.join(METRICS_DIR, 'inequality.csv'), 'ts,gini,top5share\n');
   jobQueue = new Queue('jobs', { connection: redis });
   await seedIfEmpty();
+
+  // Start HTTP server first so dashboard is immediately available
+  await app.listen({ port: cfg.SOUP_RUNNER_PORT, host: '0.0.0.0' });
+  console.log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT}`);
+
+  // Then start background processes (job generation, agents, etc.)
+  console.log('[soup-runner] Starting background processes...');
   setInterval(generateJobs, 60_000);
-  await generateJobs();
+  generateJobs().catch(console.error); // Don't await, run in background
   await startAgentWorkers();
   setInterval(() => epochTick().catch(console.error), EPOCH_MINUTES * 60_000);
-  app
-    .listen({ port: cfg.SOUP_RUNNER_PORT, host: '0.0.0.0' })
-    .then(() => console.log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT}`));
 }
 
 main().catch((e) => {
