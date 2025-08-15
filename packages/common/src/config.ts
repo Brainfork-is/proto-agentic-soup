@@ -8,6 +8,12 @@ const commonSchema = z.object({
   NODE_ENV: z.string().optional().default('development'),
   LLM_PROVIDER: z.string().optional().default(''),
   OPENAI_API_KEY: z.string().optional().default(''),
+  GOOGLE_CLOUD_PROJECT: z.string().optional().default(''),
+  GOOGLE_CLOUD_LOCATION: z.string().optional().default('us-central1'),
+  GOOGLE_APPLICATION_CREDENTIALS: z.string().optional().default(''),
+  GOOGLE_CLOUD_CREDENTIALS: z.string().optional().default(''),
+  LLM_MAX_TOKENS_PER_HOUR: z.coerce.number().optional().default(100000),
+  LLM_MAX_TOKENS_PER_AGENT: z.coerce.number().optional().default(1000),
 });
 
 const browserSchema = z.object({

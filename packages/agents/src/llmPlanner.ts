@@ -4,7 +4,7 @@
  */
 
 import { Plan, PlanStep, ExecutionResult } from './mockPlanner';
-import { llmProvider, UnifiedLLMRequest } from './llmProvider';
+import { llmProvider } from './llmProvider';
 import { memoryManager } from './agentMemory';
 
 export class LLMPlanner {
@@ -171,7 +171,7 @@ Respond with a JSON object in this exact format:
 }`;
   }
 
-  private parsePlanResponse(content: string, category: string, payload: any): Plan {
+  private parsePlanResponse(content: string, _category: string, _payload: any): Plan {
     // Extract JSON from response
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
@@ -207,7 +207,7 @@ Respond with a JSON object in this exact format:
 
   private parseReflectionResponse(
     content: string,
-    results: ExecutionResult[]
+    _results: ExecutionResult[]
   ): {
     success: boolean;
     finalResult: any;
