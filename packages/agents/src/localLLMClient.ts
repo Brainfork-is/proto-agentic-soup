@@ -178,12 +178,12 @@ export class LocalLLMClient {
       const healthUrl = this.endpoint.replace(/\/[^/]+$/, '/health');
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
-      
+
       const response = await fetch(healthUrl, {
         method: 'GET',
         signal: controller.signal,
       });
-      
+
       clearTimeout(timeoutId);
 
       if (response.ok) {
@@ -195,12 +195,12 @@ export class LocalLLMClient {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
-        
+
         const response = await fetch(this.endpoint.replace(/\/[^/]+$/, '/'), {
           method: 'GET',
           signal: controller.signal,
         });
-        
+
         clearTimeout(timeoutId);
 
         if (response.ok || response.status === 404) {
