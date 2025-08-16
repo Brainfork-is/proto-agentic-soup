@@ -10,6 +10,7 @@ export interface LocalLLMConfig {
   endpoint?: string;
   maxTokensPerHour?: number;
   maxTokensPerAgent?: number;
+  enableBudgetLimits?: boolean;
 }
 
 export interface LocalLLMRequest {
@@ -41,6 +42,7 @@ export class LocalLLMClient {
   private provider: string;
   private budget: TokenBudget;
   private enabled: boolean;
+  private budgetEnabled: boolean;
 
   constructor(config: LocalLLMConfig = {}) {
     this.provider = 'ollama'; // Simplified to only support Ollama
@@ -50,6 +52,13 @@ export class LocalLLMClient {
 
     // Check if local LLM is configured
     this.enabled = !!(process.env.LOCAL_LLM_ENABLED === '1' || process.env.LOCAL_LLM_ENDPOINT);
+
+    // Disable budget limits by default for local LLM (since it's running on user's own hardware)
+    // Can be re-enabled via config or environment variable if needed
+    this.budgetEnabled =
+      config.enableBudgetLimits !== undefined
+        ? config.enableBudgetLimits
+        : process.env.LOCAL_LLM_ENABLE_BUDGET_LIMITS === '1';
 
     this.budget = {
       maxTokensPerHour:
@@ -61,12 +70,14 @@ export class LocalLLMClient {
       lastReset: new Date(),
     };
 
-    // Reset budget every hour
-    setInterval(() => this.resetHourlyBudget(), 60 * 60 * 1000);
+    // Reset budget every hour (only if budget is enabled)
+    if (this.budgetEnabled) {
+      setInterval(() => this.resetHourlyBudget(), 60 * 60 * 1000);
+    }
 
     if (this.enabled) {
       console.log(
-        `[LocalLLM] Initialized with provider: ${this.provider}, model: ${this.modelPath}`
+        `[LocalLLM] Initialized with provider: ${this.provider}, model: ${this.modelPath}, budget limits: ${this.budgetEnabled ? 'enabled' : 'disabled'}`
       );
     }
   }
@@ -79,6 +90,11 @@ export class LocalLLMClient {
   }
 
   private checkBudget(agentId: string, estimatedTokens: number): boolean {
+    // Skip budget checks if disabled (default for local LLM)
+    if (!this.budgetEnabled) {
+      return true;
+    }
+
     if (this.budget.currentHourlyUsage + estimatedTokens > this.budget.maxTokensPerHour) {
       console.log('[LocalLLM] Hourly token budget exceeded');
       return false;
@@ -94,9 +110,12 @@ export class LocalLLMClient {
   }
 
   private updateBudget(agentId: string, tokensUsed: number) {
-    this.budget.currentHourlyUsage += tokensUsed;
-    const currentAgentUsage = this.budget.agentUsage.get(agentId) || 0;
-    this.budget.agentUsage.set(agentId, currentAgentUsage + tokensUsed);
+    // Only track usage if budget is enabled
+    if (this.budgetEnabled) {
+      this.budget.currentHourlyUsage += tokensUsed;
+      const currentAgentUsage = this.budget.agentUsage.get(agentId) || 0;
+      this.budget.agentUsage.set(agentId, currentAgentUsage + tokensUsed);
+    }
   }
 
   async generateContent(
@@ -114,6 +133,8 @@ export class LocalLLMClient {
       return null;
     }
 
+    let startTime = Date.now();
+
     try {
       // Ollama API format
       const payload = {
@@ -128,12 +149,14 @@ export class LocalLLMClient {
       };
 
       console.log(
-        `[LocalLLM] Sending request to ${this.modelPath} with prompt length: ${request.prompt.length}`
+        `[LocalLLM] Sending request to ${this.modelPath} with prompt length: ${request.prompt.length}, estimated tokens: ${estimatedTokens}`
       );
 
-      // Use longer timeout for large models (5 minutes)
+      startTime = Date.now();
+
+      // Use longer timeout for large models (10 minutes)
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
+      const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutes
 
       const response = await fetch(this.endpoint, {
         method: 'POST',
@@ -163,7 +186,10 @@ export class LocalLLMClient {
 
       this.updateBudget(agentId, tokensUsed);
 
-      console.log(`[LocalLLM] Generated ${tokensUsed} tokens for agent ${agentId}`);
+      const duration = Date.now() - startTime;
+      console.log(
+        `[LocalLLM] Generated ${tokensUsed} tokens for agent ${agentId} in ${duration}ms`
+      );
 
       return {
         content,
@@ -172,7 +198,14 @@ export class LocalLLMClient {
         modelUsed: this.modelPath,
       };
     } catch (error) {
-      console.error('[LocalLLM] Generation failed:', error);
+      const duration = Date.now() - startTime;
+      if ((error as any)?.name === 'AbortError') {
+        console.error(
+          `[LocalLLM] Request timed out after ${duration}ms for agent ${agentId}. Model: ${this.modelPath}`
+        );
+      } else {
+        console.error(`[LocalLLM] Generation failed after ${duration}ms:`, error);
+      }
       return null;
     }
   }
