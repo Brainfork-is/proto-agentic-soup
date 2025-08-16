@@ -55,7 +55,8 @@ export class SimpleAgent {
                     mode: 'summarize' | 'classify';
                     labels?: string[];
                     maxWords?: number;
-                  }
+                  },
+                  this.id // Pass agent ID for LangChain
                 );
               } else {
                 result = { error: 'StringKit tool not available' };
@@ -151,8 +152,11 @@ export class SimpleAgent {
 
     if (job.category === 'summarize') {
       const { text, maxWords } = job.payload as any;
-      const r = await Tools.stringKit({ text, mode: 'summarize', maxWords: maxWords || 12 });
-      return { ok: true, artifact: r.text! };
+      const r = await Tools.stringKit(
+        { text, mode: 'summarize', maxWords: maxWords || 12 },
+        this.id
+      );
+      return { ok: true, artifact: 'text' in r ? r.text : '' };
     }
 
     if (job.category === 'classify') {

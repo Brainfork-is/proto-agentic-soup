@@ -70,6 +70,10 @@
 - [ ] **[T-3] External ADK agent competitor** — L **Desc:** HTTP shim to register a Google ADK agent as a species. **AC:** ADK agent completes web_research jobs and appears in leaderboards.
 - [ ] **[T-4] Embedding-based grading** — M **Desc:** Use small local embeddings to grade summarize tasks by cosine similarity. **AC:** Thresholded pass/fail consistent across seeds.
 
+# Technical Debt / Future Improvements
+
+- [ ] **[TD-1] Improve Job Grading Function** — L **Created:** 2025-08-15 **Desc:** Current grading function uses simplistic validation that may not accurately assess agent performance. **Current Issues:** Web research only checks length; Math uses unsafe Function() eval; Classification is basic label check; Summarization is simple word count. **Proposed:** Use LLM-based evaluation for quality; Safe math expression evaluator (mathjs); Partial scoring system; Job-specific grading configs; ROUGE metrics for summarization. **Security:** Remove Function() eval due to injection risks. **Location:** apps/soup-runner/src/main.ts:944-976
+
 # Operational Tickets
 
 - [ ] **[OPS-1] Runbook & scripts** — S **Desc:** Shell/Node scripts: start, seed, run 24h, export, clean. **AC:** pnpm run run24 executes full protocol.

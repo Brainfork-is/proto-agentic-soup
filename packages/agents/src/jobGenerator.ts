@@ -17,21 +17,28 @@ export class JobGenerator {
 
   constructor() {
     this.templates = {
-      web_research: `Generate a web research question about the knowledge base content. 
-The knowledge base contains pages about vector databases, RAG (Retrieval Augmented Generation), and cooperation policies.
+      web_research: `Generate a professional research question that can be answered using web research and business knowledge.
 
-Available pages:
-- /docs/vector-db.html (about PGVector, Milvus, FAISS)
-- /guides/rag.html (about RAG systems)
-- /policies/coop.html (about agent cooperation)
-- /search.html (search page)
+Create realistic business questions that professionals would research in a corporate environment. Topics can include:
+- Technology implementation and best practices (cloud migration, cybersecurity, DevOps)
+- Market trends and competitive analysis (industry insights, emerging technologies)
+- Operational efficiency and process improvement (automation, workflows, cost reduction)
+- Regulatory compliance and risk management (GDPR, SOX, industry regulations)
+- Team management and organizational development (remote work, performance metrics)
+- Financial planning and cost optimization (budget allocation, ROI analysis)
+- Customer acquisition and retention strategies (CRM, customer experience)
+- Digital transformation initiatives (modernization, integration strategies)
+- Product development and innovation (roadmaps, user research, market fit)
+- Supply chain and logistics optimization
+- Data analytics and business intelligence
+- Change management and organizational culture
 
-Create a question that can be answered by browsing these pages. Questions should be varied and interesting.
+Questions should be specific, actionable, and relevant to corporate decision-making. The agent will use the available knowledge base pages and LLM capabilities to research and answer.
 
 Respond with JSON:
 {
-  "url": "http://localhost:3200/docs/vector-db.html",
-  "question": "Your generated question here"
+  "url": "http://localhost:4200/",
+  "question": "Your professional research question here"
 }`,
 
       summarize: `Generate a text summarization task with realistic content.
@@ -57,12 +64,17 @@ Respond with JSON:
 
       math: `Generate a mathematical expression for evaluation.
 
-Create varied math problems with different operations and complexity levels. Use basic arithmetic (+, -, *, /, parentheses).
+Create varied math problems with different operations and complexity levels. 
+Use ONLY these operations: + (add), - (subtract), * (multiply), / (divide), parentheses for grouping.
+DO NOT use exponentiation (^), modulo (%), or any other operations.
+Numbers can be integers or decimals.
 
 Respond with JSON:
 {
   "expr": "mathematical expression"
-}`,
+}
+
+Example: {"expr": "2 + 3 * (4 - 1) / 2"}`,
     };
   }
 
@@ -70,24 +82,21 @@ Respond with JSON:
     const categories = ['web_research', 'summarize', 'classify', 'math'] as const;
     const category = categories[Math.floor(Math.random() * categories.length)];
 
-    // Try LLM generation first
-    try {
-      const llmJob = await this.generateLLMJob(category);
-      if (llmJob) {
-        return llmJob;
-      }
-    } catch (error) {
-      console.log(`[JobGenerator] LLM generation failed for ${category}, falling back to static`);
+    // LLM generation only - for local LLM without token limits
+    const llmJob = await this.generateLLMJob(category);
+    if (!llmJob) {
+      throw new Error(`Failed to generate ${category} job with LLM`);
     }
 
-    // Fallback to static generation
-    return this.generateStaticJob(category);
+    return llmJob;
   }
 
   private async generateLLMJob(category: string): Promise<GeneratedJob | null> {
     const prompt = `${this.templates[category]}
 
 Make the content interesting and varied. Avoid repetition from previous generations.`;
+
+    console.log(`[JobGenerator] Requesting ${category} job from LLM...`);
 
     const response = await llmProvider.generateContent(
       {
@@ -99,20 +108,55 @@ Make the content interesting and varied. Avoid repetition from previous generati
     );
 
     if (!response) {
+      console.error(`[JobGenerator] LLM returned null response for ${category}`);
       return null;
     }
 
+    console.log(
+      `[JobGenerator] LLM response for ${category} (${response.tokensUsed} tokens):`,
+      response.content.substring(0, 200) + '...'
+    );
+
     try {
-      // Extract JSON from response
-      const jsonMatch = response.content.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No JSON found in response');
+      // Extract JSON from response - find first complete JSON object
+      let braceCount = 0;
+      let jsonStart = -1;
+      let jsonEnd = -1;
+
+      for (let i = 0; i < response.content.length; i++) {
+        const char = response.content[i];
+        if (char === '{') {
+          if (jsonStart === -1) jsonStart = i;
+          braceCount++;
+        } else if (char === '}') {
+          braceCount--;
+          if (braceCount === 0 && jsonStart !== -1) {
+            jsonEnd = i;
+            break;
+          }
+        }
       }
 
-      const payload = JSON.parse(jsonMatch[0]);
+      if (jsonStart === -1 || jsonEnd === -1) {
+        console.error(
+          `[JobGenerator] No valid JSON found in LLM response for ${category}. Full response:`,
+          response.content
+        );
+        throw new Error('No complete JSON found in response');
+      }
+
+      const jsonStr = response.content.substring(jsonStart, jsonEnd + 1);
+      console.log(`[JobGenerator] Extracted JSON string for ${category}:`, jsonStr);
+
+      const payload = JSON.parse(jsonStr);
+      console.log(`[JobGenerator] Parsed ${category} payload:`, JSON.stringify(payload));
 
       // Validate payload based on category
       if (!this.validatePayload(category, payload)) {
+        console.error(`[JobGenerator] Validation failed for ${category}. Expected structure:`);
+        this.logExpectedStructure(category);
+        console.error(`[JobGenerator] Received payload:`, JSON.stringify(payload, null, 2));
+        console.error(`[JobGenerator] Full LLM response was:`, response.content);
         throw new Error('Invalid payload structure');
       }
 
@@ -123,9 +167,36 @@ Make the content interesting and varied. Avoid repetition from previous generati
         deadlineS: 60,
       };
     } catch (error) {
-      console.log(`[JobGenerator] Failed to parse LLM response for ${category}:`, error);
+      console.error(`[JobGenerator] Failed to parse LLM response for ${category}:`, error);
+      console.error(`[JobGenerator] Error details:`, (error as Error).message);
       return null;
     }
+  }
+
+  private logExpectedStructure(category: string): void {
+    const expectedStructures: Record<string, any> = {
+      web_research: {
+        url: 'string (must be http://localhost:4200/...)',
+        question: 'string',
+      },
+      summarize: {
+        text: 'string (2-4 sentences)',
+        maxWords: 'number (8-20)',
+      },
+      classify: {
+        text: 'string',
+        labels: 'array of strings',
+        answer: 'string (must be one of the labels)',
+      },
+      math: {
+        expr: 'string (mathematical expression with +, -, *, /, parentheses)',
+      },
+    };
+
+    console.error(
+      `[JobGenerator] Expected structure for ${category}:`,
+      JSON.stringify(expectedStructures[category], null, 2)
+    );
   }
 
   private validatePayload(category: string, payload: any): boolean {
@@ -160,6 +231,7 @@ Make the content interesting and varied. Avoid repetition from previous generati
         );
 
       case 'math':
+        // Allow numbers, basic operations, parentheses, spaces, and decimals only
         return (
           payload.expr &&
           typeof payload.expr === 'string' &&

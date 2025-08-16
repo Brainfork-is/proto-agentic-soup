@@ -1,8 +1,15 @@
 import { browserRun } from './browserTool';
 import { createMCPClient } from './mcpClient';
+import { SummarizationTool } from './tools/langchainSummarization';
+import { ClassificationTool } from './tools/langchainClassification';
 
 // Create MCP client singleton if configured
 const mcpClient = createMCPClient();
+
+// Check if LangChain tools should be enabled
+const USE_LANGCHAIN = process.env.LANGCHAIN_ENABLED === 'true';
+const USE_LANGCHAIN_SUMMARIZATION = process.env.LANGCHAIN_SUMMARIZATION !== 'false'; // Default to true if LangChain is enabled
+const USE_LANGCHAIN_CLASSIFICATION = process.env.LANGCHAIN_CLASSIFICATION !== 'false'; // Default to true if LangChain is enabled
 
 export const Tools = {
   async browser(i: { url: string; steps: any[] }) {
@@ -15,13 +22,24 @@ export const Tools = {
     return { ok: true, value: v } as const;
   },
 
-  async stringKit(i: {
-    text: string;
-    mode: 'summarize' | 'classify';
-    labels?: string[];
-    maxWords?: number;
-  }) {
+  async stringKit(
+    i: {
+      text: string;
+      mode: 'summarize' | 'classify';
+      labels?: string[];
+      maxWords?: number;
+    },
+    agentId?: string
+  ) {
     if (i.mode === 'summarize') {
+      // Use LangChain summarization if enabled
+      if (USE_LANGCHAIN && USE_LANGCHAIN_SUMMARIZATION) {
+        const tool = new SummarizationTool(agentId || 'agent', true);
+        const result = await tool.call({ text: i.text, maxWords: i.maxWords });
+        return result;
+      }
+
+      // Mock implementation (original behavior) - only when LangChain is disabled
       return {
         text: i.text
           .split(/\s+/)
@@ -30,6 +48,14 @@ export const Tools = {
       };
     }
     if (i.mode === 'classify') {
+      // Use LangChain classification if enabled
+      if (USE_LANGCHAIN && USE_LANGCHAIN_CLASSIFICATION && i.labels) {
+        const tool = new ClassificationTool(agentId || 'agent', true);
+        const result = await tool.call({ text: i.text, labels: i.labels });
+        return result;
+      }
+
+      // Mock implementation (original behavior) - only when LangChain is disabled
       return { label: (i.labels || ['A'])[0] };
     }
     return {};
@@ -98,5 +124,26 @@ export const Tools = {
         error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
+  },
+
+  // New dedicated classification tool
+  async classify(
+    i: { text: string; labels: string[]; withConfidence?: boolean },
+    agentId?: string
+  ) {
+    if (USE_LANGCHAIN && USE_LANGCHAIN_CLASSIFICATION) {
+      const tool = new ClassificationTool(agentId || 'agent', true);
+      return await tool.classifyWithOptions({
+        text: i.text,
+        labels: i.labels,
+        withConfidence: i.withConfidence,
+      });
+    }
+
+    // Mock implementation - only when LangChain is disabled
+    return {
+      label: i.labels[0] || 'Unknown',
+      method: 'mock' as const,
+    };
   },
 };

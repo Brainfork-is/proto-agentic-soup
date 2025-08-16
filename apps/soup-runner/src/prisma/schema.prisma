@@ -44,6 +44,7 @@ model Job {
 model Ledger {
   id      String   @id @default(cuid())
   agentId String
+  jobId   String?  // Optional job ID for tracking which job this transaction relates to
   delta   Int
   reason  String
   ts      DateTime @default(now())
