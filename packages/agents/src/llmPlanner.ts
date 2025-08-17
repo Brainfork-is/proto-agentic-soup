@@ -55,6 +55,8 @@ export class LLMPlanner {
       console.log(
         `[LLMPlanner] Agent ${this.agentId}: Failed to parse LLM plan, falling back to mock`
       );
+      console.log(`[LLMPlanner] LLM Response: ${response.content.substring(0, 200)}...`);
+      console.log(`[LLMPlanner] Parse Error: ${(error as Error).message}`);
       return this.mockPlan(category, payload);
     }
   }
@@ -172,13 +174,23 @@ Respond with a JSON object in this exact format:
   }
 
   private parsePlanResponse(content: string, _category: string, _payload: any): Plan {
-    // Extract JSON from response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('No JSON found in plan response');
+    // Extract JSON from response - handle markdown code blocks and other formats
+    let jsonStr = '';
+
+    // Try to extract from markdown code block first
+    const codeBlockMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1];
+    } else {
+      // Fall back to finding the first JSON object
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in plan response');
+      }
+      jsonStr = jsonMatch[0];
     }
 
-    const planData = JSON.parse(jsonMatch[0]);
+    const planData = JSON.parse(jsonStr);
 
     // Validate required fields
     if (!planData.goal || !planData.steps || !Array.isArray(planData.steps)) {
@@ -213,13 +225,23 @@ Respond with a JSON object in this exact format:
     finalResult: any;
     adjustments?: string[];
   } {
-    // Extract JSON from response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('No JSON found in reflection response');
+    // Extract JSON from response - handle markdown code blocks and other formats
+    let jsonStr = '';
+
+    // Try to extract from markdown code block first
+    const codeBlockMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1];
+    } else {
+      // Fall back to finding the first JSON object
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in reflection response');
+      }
+      jsonStr = jsonMatch[0];
     }
 
-    const reflectionData = JSON.parse(jsonMatch[0]);
+    const reflectionData = JSON.parse(jsonStr);
 
     // Validate required fields
     if (typeof reflectionData.success !== 'boolean' || !reflectionData.finalResult) {
