@@ -11,7 +11,7 @@ import path from 'path';
 const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
-import { SimpleAgent, jobGenerator } from '@soup/agents';
+import { SimpleAgent, LangGraphAgent, SpecializedAgentFactory, jobGenerator } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
 const app = Fastify();
@@ -1014,12 +1014,24 @@ async function startAgentWorkers() {
 
   for (const s of agents) {
     const bp = bps.find((b: any) => b.id === s.blueprintId)!;
-    const agent = new SimpleAgent(s.id, bp.temperature, bp.tools.split(',').filter(Boolean));
 
     const worker = new Worker(
       'jobs',
       async (job: any) => {
         const started = Date.now();
+
+        // Create specialized agent based on job category for natural selection
+        const agent = SpecializedAgentFactory.createAgent(
+          s.id,
+          bp.temperature,
+          bp.tools.split(',').filter(Boolean),
+          undefined, // Let factory choose best type
+          job.data.category // Pass job category for specialization
+        );
+
+        console.log(
+          `[Worker] Agent ${s.id} (specialized for ${job.data.category}) processing job ${job.data.dbJobId}`
+        );
         const res: any = await agent.handle(job.data);
 
         const steps = res.stepsUsed || 0;
