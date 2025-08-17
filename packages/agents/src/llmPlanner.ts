@@ -6,6 +6,43 @@
 import { Plan, PlanStep, ExecutionResult } from './mockPlanner';
 import { llmProvider } from './llmProvider';
 import { memoryManager } from './agentMemory';
+import fs from 'fs-extra';
+import path from 'path';
+
+// Debug logger for LLM planner issues
+class LLMDebugLogger {
+  private static instance: LLMDebugLogger;
+  private logFile: string;
+
+  constructor() {
+    this.logFile = path.join(process.cwd(), 'llm-debug.log');
+    this.log('='.repeat(80));
+    this.log(`LLM Debug log started at ${new Date().toISOString()}`);
+    this.log('='.repeat(80));
+  }
+
+  static getInstance(): LLMDebugLogger {
+    if (!LLMDebugLogger.instance) {
+      LLMDebugLogger.instance = new LLMDebugLogger();
+    }
+    return LLMDebugLogger.instance;
+  }
+
+  log(message: string) {
+    const timestamp = new Date().toISOString().substring(11, 23);
+    const logLine = `[${timestamp}] ${message}`;
+
+    // Write to console and file
+    console.log(logLine);
+    try {
+      fs.appendFileSync(this.logFile, logLine + '\n');
+    } catch (error) {
+      // Ignore file write errors
+    }
+  }
+}
+
+const llmDebugLogger = LLMDebugLogger.getInstance();
 
 export class LLMPlanner {
   private temperature: number;
@@ -47,16 +84,16 @@ export class LLMPlanner {
 
     try {
       const plan = this.parsePlanResponse(response.content, category, payload);
-      console.log(
+      llmDebugLogger.log(
         `[LLMPlanner] Agent ${this.agentId}: Generated LLM plan for ${category} using ${response.provider}`
       );
       return plan;
     } catch (error) {
-      console.log(
+      llmDebugLogger.log(
         `[LLMPlanner] Agent ${this.agentId}: Failed to parse LLM plan, falling back to mock`
       );
-      console.log(`[LLMPlanner] LLM Response: ${response.content.substring(0, 200)}...`);
-      console.log(`[LLMPlanner] Parse Error: ${(error as Error).message}`);
+      llmDebugLogger.log(`[LLMPlanner] LLM Response: ${response.content.substring(0, 500)}...`);
+      llmDebugLogger.log(`[LLMPlanner] Parse Error: ${(error as Error).message}`);
       return this.mockPlan(category, payload);
     }
   }
@@ -198,29 +235,31 @@ Respond with a JSON object in this exact format:
     }
 
     // Validate steps and filter out tools not available to this agent
-    console.log(
+    llmDebugLogger.log(
       `[LLMPlanner] Agent ${this.agentId}: Available tools: [${this.availableTools.join(', ')}]`
     );
-    console.log(`[LLMPlanner] Agent ${this.agentId}: Plan has ${planData.steps.length} steps`);
+    llmDebugLogger.log(
+      `[LLMPlanner] Agent ${this.agentId}: Plan has ${planData.steps.length} steps`
+    );
 
     const validSteps = planData.steps.filter((step: any, index: number) => {
-      console.log(
+      llmDebugLogger.log(
         `[LLMPlanner] Step ${index + 1}: tool="${step.tool}", action="${step.action}", params=${step.params ? 'present' : 'missing'}`
       );
 
       if (!step.tool || !this.availableTools.includes(step.tool)) {
-        console.log(
+        llmDebugLogger.log(
           `[LLMPlanner] ❌ Skipping step ${index + 1} with unavailable tool: ${step.tool}`
         );
         return false;
       }
 
       if (!step.action || !step.params) {
-        console.log(`[LLMPlanner] ❌ Skipping step ${index + 1} missing action or params`);
+        llmDebugLogger.log(`[LLMPlanner] ❌ Skipping step ${index + 1} missing action or params`);
         return false;
       }
 
-      console.log(`[LLMPlanner] ✅ Step ${index + 1} is valid`);
+      llmDebugLogger.log(`[LLMPlanner] ✅ Step ${index + 1} is valid`);
       return true;
     });
 

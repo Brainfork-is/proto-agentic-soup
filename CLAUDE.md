@@ -30,6 +30,10 @@ pnpm --filter @soup/soup-runner prisma:migrate   # Run migrations
 # Development mode (starts all services)
 pnpm dev                  # Runs all three services concurrently
 
+# Debug logs (created automatically when services run)
+debug.log                 # Main soup-runner debug log  
+llm-debug.log            # LLM planner specific debug log
+
 # Individual services
 pnpm --filter @soup/soup-runner dev        # Main orchestrator (port 3000)
 pnpm --filter @soup/browser-gateway dev    # Browser API (port 3100)
