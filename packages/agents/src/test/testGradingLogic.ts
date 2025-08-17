@@ -2,7 +2,7 @@
  * Test the grading logic to understand the production bug
  */
 
-import path from 'path';
+// Test grading logic behavior
 
 // We need to import the grading function from soup-runner
 // Let's create a simple test to verify our fix
