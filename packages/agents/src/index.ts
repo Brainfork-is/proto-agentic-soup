@@ -1,6 +1,6 @@
 import { JobData } from '@soup/common';
 import { Tools } from './tools';
-import { MockPlanner, ExecutionResult } from './mockPlanner';
+import { ExecutionResult } from './mockPlanner';
 import { LLMPlanner } from './llmPlanner';
 import { memoryManager } from './agentMemory';
 
@@ -13,19 +13,17 @@ export class SimpleAgent {
   temperature: number;
   tools: string[];
   private llmPlanner: LLMPlanner;
-  private mockPlanner: MockPlanner;
 
   constructor(id: string, t: number, tools: string[]) {
     this.id = id;
     this.temperature = t;
     this.tools = tools;
     this.llmPlanner = new LLMPlanner(t, tools, id);
-    this.mockPlanner = new MockPlanner(t, tools);
   }
 
   async handle(job: JobData) {
     try {
-      // Phase 1: Planning (try LLM first, fallback to mock)
+      // Phase 1: Planning
       const plan = await this.llmPlanner.plan(job.category, job.payload);
 
       // Phase 2: Acting (execute each step)
@@ -103,7 +101,7 @@ export class SimpleAgent {
         }
       }
 
-      // Phase 3: Reflection (try LLM first, fallback to mock)
+      // Phase 3: Reflection
       const reflection = await this.llmPlanner.reflect(plan, executionResults);
 
       // Store experience in memory
@@ -126,8 +124,9 @@ export class SimpleAgent {
         adjustments: reflection.adjustments,
       };
     } catch (error) {
-      // Fallback to simple behavior if planner fails
-      return this.handleSimple(job);
+      // Let it fail gracefully - no fallbacks per project policy
+      console.error(`[SimpleAgent] Agent ${this.id} failed to handle job:`, error);
+      throw error;
     }
   }
 
