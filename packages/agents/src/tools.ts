@@ -2,6 +2,7 @@ import { browserRun } from './browserTool';
 import { createMCPClient } from './mcpClient';
 import { SummarizationTool } from './tools/langchainSummarization';
 import { ClassificationTool } from './tools/langchainClassification';
+import { calculatorTool } from './tools/langchainCalc';
 
 // Create MCP client singleton if configured
 const mcpClient = createMCPClient();
@@ -17,9 +18,9 @@ export const Tools = {
   },
 
   async calc(i: { expr: string }) {
-    if (!/^[0-9+\-*/().\s]+$/.test(i.expr)) return { ok: false } as const;
-    const v = eval(i.expr);
-    return { ok: true, value: v } as const;
+    // Use enhanced calculator tool with mathjs and LLM capabilities
+    const result = await calculatorTool.run(i);
+    return result;
   },
 
   async stringKit(
