@@ -1,5 +1,9 @@
 import fetch from 'node-fetch';
-const BROWSER_URL = process.env.BROWSER_GATEWAY_URL || 'http://localhost:3100';
+import { loadBrowserConfig } from '@soup/common';
+
+const config = loadBrowserConfig();
+const BROWSER_URL =
+  process.env.BROWSER_GATEWAY_URL || `http://localhost:${config.BROWSER_GATEWAY_PORT}`;
 export async function browserRun(input: { url: string; steps: any[] }): Promise<any> {
   const r = await fetch(`${BROWSER_URL}/run`, {
     method: 'POST',
