@@ -25,7 +25,36 @@ const STEP_COST = cfg.BROWSER_STEP_COST;
 
 const RUN_DIR = path.join(process.cwd(), 'runs', String(Date.now()));
 const METRICS_DIR = path.join(RUN_DIR, 'metrics');
+const DEBUG_LOG_FILE = path.join(process.cwd(), 'debug.log');
 fs.ensureDirSync(METRICS_DIR);
+
+// Create a debug logger that writes to both console and file
+class DebugLogger {
+  private logStream: fs.WriteStream;
+
+  constructor() {
+    this.logStream = fs.createWriteStream(DEBUG_LOG_FILE, { flags: 'w' });
+    this.log('='.repeat(80));
+    this.log(`Debug log started at ${new Date().toISOString()}`);
+    this.log(`Process: soup-runner (PID: ${process.pid})`);
+    this.log('='.repeat(80));
+  }
+
+  log(message: string) {
+    const timestamp = new Date().toISOString().substring(11, 23); // HH:mm:ss.SSS
+    const logLine = `[${timestamp}] ${message}`;
+
+    // Write to both console and file
+    console.log(logLine);
+    this.logStream.write(logLine + '\n');
+  }
+
+  close() {
+    this.logStream.end();
+  }
+}
+
+const debugLogger = new DebugLogger();
 
 app.get('/leaderboard', async () => {
   const s = await prisma.agentState.findMany();
@@ -1043,7 +1072,10 @@ async function startAgentWorkers() {
 
         return { ok: jobSucceeded, artifact: res.artifact };
       },
-      { connection: redis, concurrency: 1 }
+      {
+        connection: redis,
+        concurrency: 3,
+      }
     );
 
     agentWorkers.push(worker);
