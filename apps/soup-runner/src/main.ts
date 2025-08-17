@@ -1043,7 +1043,14 @@ async function startAgentWorkers() {
 
         return { ok: jobSucceeded, artifact: res.artifact };
       },
-      { connection: redis, concurrency: 1 }
+      {
+        connection: redis,
+        concurrency: 3,
+        settings: {
+          stalledInterval: 1000, // Check for stalled jobs every 1s
+          maxStalledCount: 1, // Retry stalled jobs quickly
+        },
+      }
     );
 
     agentWorkers.push(worker);

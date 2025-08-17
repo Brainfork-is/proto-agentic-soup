@@ -122,6 +122,11 @@ pnpm add @langchain/core @langchain/community langchain mathjs
 3. Create retrieval chain ✅
 4. Test with web_research jobs ✅
 
+**Note**: The current vector store implementation uses an in-memory LangChain MemoryVectorStore. 
+In a future phase, this will be upgraded to use an MCP-based RAG system for more scalable 
+and persistent vector storage. The current implementation provides a solid foundation and 
+abstraction layer that will make this transition seamless.
+
 ### Sprint 5: browser Tool Enhancement
 1. Implement LLM-powered content extraction
 2. Add intelligent navigation
