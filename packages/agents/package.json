@@ -13,11 +13,21 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@langchain/community": "^0.3.51",
+    "@langchain/core": "^0.3.71",
+    "@langchain/google-vertexai": "^0.2.16",
+    "@langchain/openai": "^0.6.7",
+    "@langchain/textsplitters": "^0.1.0",
     "@soup/common": "workspace:*",
+    "google-auth-library": "^9.0.0",
+    "langchain": "^0.3.30",
+    "mathjs": "^14.6.0",
     "node-fetch": "^3.3.2",
-    "google-auth-library": "^9.0.0"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/mathjs": "^9.4.2",
+    "tsx": "^4.16.2",
     "typescript": "^5.5.0"
   }
 }
