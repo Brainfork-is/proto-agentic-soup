@@ -2,7 +2,7 @@
  * Test the enhanced calculator tool with mathjs and LLM capabilities
  */
 
-import { calculatorTool, calculate } from '../tools/langchainCalc';
+import { calculate } from '../tools/langchainCalc';
 import { Tools } from '../tools';
 
 async function testCalculatorTool() {
