@@ -86,6 +86,16 @@ soup-runner (3000) ←→ browser-gateway (3100) ←→ site-kb (3200)
 
 ## Key Patterns
 
+### Error Handling Philosophy
+
+**NO MOCKS OR FALLBACKS**: When something fails, it should fail gracefully and log the failure. Do not add mock implementations or fallback behaviors. Let failures be visible and debuggable. This applies to:
+- LLM plan parsing failures
+- Tool execution failures  
+- API call failures
+- Any other errors
+
+If an agent can't generate a valid plan or execute a task, it should simply fail with proper logging rather than falling back to mock behavior.
+
 ### Workspace Structure
 
 This is a pnpm workspace monorepo. Import packages using `@soup/` prefix:
