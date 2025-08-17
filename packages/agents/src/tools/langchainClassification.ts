@@ -6,7 +6,7 @@
 import { PromptTemplate } from '@langchain/core/prompts';
 import { LLMChain } from 'langchain/chains';
 import { createLangChainLLM } from '../langchainProvider';
-import { StructuredOutputParser } from 'langchain/output_parsers';
+// LangChain classification tool
 
 export interface ClassificationOptions {
   text: string;

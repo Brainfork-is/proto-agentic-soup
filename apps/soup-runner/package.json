@@ -13,7 +13,7 @@
     "prisma:generate": "prisma generate --schema=./src/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --name init --schema=./src/prisma/schema.prisma",
     "clean": "npm run clean:db && npm run clean:redis",
-    "clean:db": "sqlite3 ./src/prisma/dev.db \"DELETE FROM Ledger; DELETE FROM Job; DELETE FROM AgentState; DELETE FROM Blueprint; DELETE FROM Edge;\"",
+    "clean:db": "sqlite3 ./src/prisma/src/prisma/dev.db \"DELETE FROM Ledger; DELETE FROM Job; DELETE FROM AgentState; DELETE FROM Blueprint; DELETE FROM Edge;\"",
     "clean:redis": "redis-cli FLUSHALL"
   },
   "dependencies": {

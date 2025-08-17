@@ -6,56 +6,89 @@
 import { Plan, PlanStep, ExecutionResult } from './mockPlanner';
 import { llmProvider } from './llmProvider';
 import { memoryManager } from './agentMemory';
+import fs from 'fs';
+import path from 'path';
+
+// Debug logger for LLM planner issues
+class LLMDebugLogger {
+  private static instance: LLMDebugLogger;
+  private logFile: string;
+
+  constructor() {
+    this.logFile = path.join(process.cwd(), 'llm-debug.log');
+    this.log('='.repeat(80));
+    this.log(`LLM Debug log started at ${new Date().toISOString()}`);
+    this.log('='.repeat(80));
+  }
+
+  static getInstance(): LLMDebugLogger {
+    if (!LLMDebugLogger.instance) {
+      LLMDebugLogger.instance = new LLMDebugLogger();
+    }
+    return LLMDebugLogger.instance;
+  }
+
+  log(message: string) {
+    const timestamp = new Date().toISOString().substring(11, 23);
+    const logLine = `[${timestamp}] ${message}`;
+
+    // Write to console and file
+    console.log(logLine);
+    try {
+      fs.appendFileSync(this.logFile, logLine + '\n');
+    } catch (error) {
+      // Ignore file write errors
+    }
+  }
+}
+
+const llmDebugLogger = LLMDebugLogger.getInstance();
 
 export class LLMPlanner {
   private temperature: number;
   private availableTools: string[];
   private agentId: string;
-  private fallbackToMock: boolean;
 
   constructor(temperature: number = 0.5, tools: string[] = [], agentId: string = 'unknown') {
     this.temperature = temperature;
     this.availableTools = tools;
     this.agentId = agentId;
-    this.fallbackToMock = false;
   }
 
   /**
    * Plan phase: Create a plan using LLM reasoning
    */
   async plan(category: string, payload: any): Promise<Plan> {
-    if (this.fallbackToMock) {
-      return this.mockPlan(category, payload);
-    }
-
     const prompt = this.buildPlanningPrompt(category, payload);
 
     const response = await llmProvider.generateContent(
       {
         prompt,
         temperature: this.temperature,
-        maxTokens: 800,
+        maxTokens: 1200,
       },
       this.agentId
     );
 
     if (!response) {
-      console.log(`[LLMPlanner] Agent ${this.agentId}: LLM planning failed, falling back to mock`);
-      this.fallbackToMock = true;
-      return this.mockPlan(category, payload);
+      llmDebugLogger.log(
+        `[LLMPlanner] Agent ${this.agentId}: LLM planning failed - no response from provider`
+      );
+      throw new Error('LLM planning failed - no response from provider');
     }
 
     try {
       const plan = this.parsePlanResponse(response.content, category, payload);
-      console.log(
+      llmDebugLogger.log(
         `[LLMPlanner] Agent ${this.agentId}: Generated LLM plan for ${category} using ${response.provider}`
       );
       return plan;
     } catch (error) {
-      console.log(
-        `[LLMPlanner] Agent ${this.agentId}: Failed to parse LLM plan, falling back to mock`
-      );
-      return this.mockPlan(category, payload);
+      llmDebugLogger.log(`[LLMPlanner] Agent ${this.agentId}: Failed to parse LLM plan`);
+      llmDebugLogger.log(`[LLMPlanner] LLM Response Length: ${response.content.length} chars`);
+      llmDebugLogger.log(`[LLMPlanner] Full LLM Response: ${response.content}`);
+      llmDebugLogger.log(`[LLMPlanner] Parse Error: ${(error as Error).message}`);
+      throw error; // Let it fail gracefully
     }
   }
 
@@ -70,10 +103,6 @@ export class LLMPlanner {
     finalResult: any;
     adjustments?: string[];
   }> {
-    if (this.fallbackToMock) {
-      return this.mockReflect(plan, results);
-    }
-
     const prompt = this.buildReflectionPrompt(plan, results);
 
     const response = await llmProvider.generateContent(
@@ -86,23 +115,22 @@ export class LLMPlanner {
     );
 
     if (!response) {
-      console.log(
-        `[LLMPlanner] Agent ${this.agentId}: LLM reflection failed, falling back to mock`
+      llmDebugLogger.log(
+        `[LLMPlanner] Agent ${this.agentId}: LLM reflection failed - no response from provider`
       );
-      return this.mockReflect(plan, results);
+      throw new Error('LLM reflection failed - no response from provider');
     }
 
     try {
       const reflection = this.parseReflectionResponse(response.content, results);
-      console.log(
+      llmDebugLogger.log(
         `[LLMPlanner] Agent ${this.agentId}: Generated LLM reflection using ${response.provider}`
       );
       return reflection;
     } catch (error) {
-      console.log(
-        `[LLMPlanner] Agent ${this.agentId}: Failed to parse LLM reflection, falling back to mock`
-      );
-      return this.mockReflect(plan, results);
+      llmDebugLogger.log(`[LLMPlanner] Agent ${this.agentId}: Failed to parse LLM reflection`);
+      llmDebugLogger.log(`[LLMPlanner] Reflection Error: ${(error as Error).message}`);
+      throw error; // Let it fail gracefully
     }
   }
 
@@ -119,17 +147,28 @@ ${memoryContext}
 Based on your past experience, plan accordingly.
 
 AVAILABLE TOOLS: ${toolsStr}
+⚠️  CRITICAL: You can ONLY use tools from the AVAILABLE TOOLS list above. Do NOT use any other tools.
 
 TASK CATEGORY: ${category}
 TASK PAYLOAD: ${JSON.stringify(payload, null, 2)}
 
 TOOL CAPABILITIES:
-- browser: Navigate web pages, extract content (params: {url, steps: [{type: 'wait', ms}, {type: 'extract', selector}]})
-- stringKit: Summarize or classify text (params: {text, mode: 'summarize'|'classify', maxWords?, labels?})
-- calc: Evaluate math expressions (params: {expr})
-- retrieval: Search knowledge base (params: {query, useKnowledgeServer?})
+- browser: Navigate web pages, extract content. REQUIRED: {"url": "...", "steps": [...]}
+- stringKit: Summarize or classify text. REQUIRED: {"text": "...", "mode": "summarize"|"classify"}
+- calc: Evaluate math expressions. REQUIRED: {"expr": "..."}
+- retrieval: Search knowledge base. REQUIRED: {"query": "..."}
 
-Create a step-by-step plan to complete this task. Only use tools that are in your AVAILABLE TOOLS list.
+⚠️  CRITICAL RULES:
+1. Every step MUST use a tool from your AVAILABLE TOOLS: ${toolsStr}
+2. Browser tool MUST always include "url" parameter
+3. All params must be properly formatted with required properties
+4. Use double quotes for ALL strings and property names
+
+CORRECT JSON examples (copy exactly):
+- Browser: {"tool": "browser", "params": {"url": "https://example.com", "steps": [{"type": "wait", "ms": 1000}]}}
+- StringKit: {"tool": "stringKit", "params": {"text": "some text", "mode": "summarize", "maxWords": 10}}
+- Calc: {"tool": "calc", "params": {"expr": "2 + 2"}}
+- Retrieval: {"tool": "retrieval", "params": {"query": "search term"}}
 
 Respond with a JSON object in this exact format:
 {
@@ -171,14 +210,83 @@ Respond with a JSON object in this exact format:
 }`;
   }
 
+  private sanitizeJSON(jsonStr: string): string {
+    // Fix common LLM JSON formatting issues
+    let sanitized = jsonStr
+      // Fix single quotes around string values
+      .replace(/'([^']*?)'/g, '"$1"')
+      // Fix unquoted property names (but be careful with nested objects)
+      .replace(/(\w+):\s*(["{[])/g, '"$1": $2')
+      // Fix unquoted property names followed by strings
+      .replace(/(\w+):\s*'([^']*)'/g, '"$1": "$2"')
+      // Fix type: 'wait' patterns specifically
+      .replace(/type:\s*'(\w+)'/g, '"type": "$1"')
+      .replace(/mode:\s*'(\w+)'/g, '"mode": "$1"')
+      // Fix empty tool names
+      .replace(/"tool":\s*"",/g, '"tool": "unknown",')
+      // Fix empty query params
+      .replace(/"query":\s*""/g, '"query": "search"')
+      // Fix empty expr params
+      .replace(/"expr":\s*""/g, '"expr": "1+1"')
+      // Fix browser steps missing URL
+      .replace(/"params":\s*\{\s*"steps":/g, '"params": {"url": "https://example.com", "steps":')
+      // Fix missing commas between object properties
+      .replace(/"\s*([}\]])([^,\s])/g, '"$1,$2')
+      .replace(/([^,\s])\s*"([^"]*)":\s*"/g, '$1, "$2": "')
+      // Fix trailing commas
+      .replace(/,(\s*[}\]])/g, '$1')
+      // Clean up any double-double quotes that might have been created
+      .replace(/""/g, '"')
+      // Remove control characters that break JSON
+      .replace(/[\x00-\x1F\x7F]/g, ''); // eslint-disable-line no-control-regex
+
+    // Additional validation and aggressive fixes
+    try {
+      JSON.parse(sanitized);
+      return sanitized;
+    } catch (error) {
+      // More aggressive structural fixes
+      sanitized = sanitized
+        // Fix common comma issues around position markers
+        .replace(/("reasoning":\s*"[^"]*")\s*([}\]])/g, '$1$2')
+        .replace(/("context":\s*\{[^}]*\})\s*([}\]])/g, '$1$2')
+        // Ensure proper object closure
+        .replace(/\s*$/, '')
+        // Remove invalid trailing content
+        .replace(/\}[^}]*$/, '}');
+
+      // Final attempt - if still broken, throw the error
+      try {
+        JSON.parse(sanitized);
+        return sanitized;
+      } catch (finalError) {
+        llmDebugLogger.log(`[LLMPlanner] JSON sanitization failed completely`);
+        throw finalError; // Let it fail gracefully instead of using fallback
+      }
+    }
+  }
+
   private parsePlanResponse(content: string, _category: string, _payload: any): Plan {
-    // Extract JSON from response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('No JSON found in plan response');
+    // Extract JSON from response - handle markdown code blocks and other formats
+    let jsonStr = '';
+
+    // Try to extract from markdown code block first
+    const codeBlockMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1];
+    } else {
+      // Fall back to finding the first JSON object
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in plan response');
+      }
+      jsonStr = jsonMatch[0];
     }
 
-    const planData = JSON.parse(jsonMatch[0]);
+    // Sanitize common JSON formatting issues
+    jsonStr = this.sanitizeJSON(jsonStr);
+
+    const planData = JSON.parse(jsonStr);
 
     // Validate required fields
     if (!planData.goal || !planData.steps || !Array.isArray(planData.steps)) {
@@ -186,12 +294,37 @@ Respond with a JSON object in this exact format:
     }
 
     // Validate steps and filter out tools not available to this agent
-    const validSteps = planData.steps.filter((step: any) => {
-      if (!step.tool || !this.availableTools.includes(step.tool)) {
-        console.log(`[LLMPlanner] Skipping step with unavailable tool: ${step.tool}`);
+    llmDebugLogger.log(
+      `[LLMPlanner] Agent ${this.agentId}: Available tools: [${this.availableTools.join(', ')}]`
+    );
+    llmDebugLogger.log(
+      `[LLMPlanner] Agent ${this.agentId}: Plan has ${planData.steps.length} steps`
+    );
+
+    const validSteps = planData.steps.filter((step: any, index: number) => {
+      llmDebugLogger.log(
+        `[LLMPlanner] Step ${index + 1}: tool="${step.tool}", action="${step.action}", params=${step.params ? 'present' : 'missing'}`
+      );
+
+      if (
+        !step.tool ||
+        step.tool === '' ||
+        step.tool === 'unknown' ||
+        !this.availableTools.includes(step.tool)
+      ) {
+        llmDebugLogger.log(
+          `[LLMPlanner] ❌ Skipping step ${index + 1} with unavailable tool: ${step.tool || 'empty'}`
+        );
         return false;
       }
-      return step.action && step.params;
+
+      if (!step.action || !step.params) {
+        llmDebugLogger.log(`[LLMPlanner] ❌ Skipping step ${index + 1} missing action or params`);
+        return false;
+      }
+
+      llmDebugLogger.log(`[LLMPlanner] ✅ Step ${index + 1} is valid`);
+      return true;
     });
 
     if (validSteps.length === 0) {
@@ -213,13 +346,26 @@ Respond with a JSON object in this exact format:
     finalResult: any;
     adjustments?: string[];
   } {
-    // Extract JSON from response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('No JSON found in reflection response');
+    // Extract JSON from response - handle markdown code blocks and other formats
+    let jsonStr = '';
+
+    // Try to extract from markdown code block first
+    const codeBlockMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1];
+    } else {
+      // Fall back to finding the first JSON object
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in reflection response');
+      }
+      jsonStr = jsonMatch[0];
     }
 
-    const reflectionData = JSON.parse(jsonMatch[0]);
+    // Sanitize common JSON formatting issues
+    jsonStr = this.sanitizeJSON(jsonStr);
+
+    const reflectionData = JSON.parse(jsonStr);
 
     // Validate required fields
     if (typeof reflectionData.success !== 'boolean' || !reflectionData.finalResult) {
@@ -230,121 +376,6 @@ Respond with a JSON object in this exact format:
       success: reflectionData.success,
       finalResult: reflectionData.finalResult,
       adjustments: reflectionData.adjustments || [],
-    };
-  }
-
-  // Fallback to mock behavior when LLM is unavailable
-  private mockPlan(category: string, payload: any): Plan {
-    const plans: Record<string, Plan> = {
-      web_research: {
-        goal: `Research and answer: ${payload.question}`,
-        steps: [
-          {
-            action: 'navigate_and_extract',
-            tool: 'browser',
-            params: {
-              url: payload.url,
-              steps: [
-                { type: 'wait', ms: 100 },
-                { type: 'extract', selector: 'body' },
-              ],
-            },
-            reasoning: 'Navigate to the URL and extract page content to find the answer',
-          },
-        ],
-        context: { strategy: 'direct_extraction' },
-      },
-      summarize: {
-        goal: `Summarize text in ${payload.maxWords || 12} words or less`,
-        steps: [
-          {
-            action: 'summarize_text',
-            tool: 'stringKit',
-            params: {
-              text: payload.text,
-              mode: 'summarize',
-              maxWords: payload.maxWords || 12,
-            },
-            reasoning: 'Use text processing to create a concise summary',
-          },
-        ],
-        context: { strategy: 'text_compression' },
-      },
-      classify: {
-        goal: `Classify text into one of: ${payload.labels?.join(', ') || 'categories'}`,
-        steps: [
-          {
-            action: 'classify_text',
-            tool: 'stringKit',
-            params: {
-              text: payload.text,
-              mode: 'classify',
-              labels: payload.labels,
-            },
-            reasoning: 'Analyze text content to determine the appropriate classification',
-          },
-        ],
-        context: { strategy: 'pattern_matching' },
-      },
-      math: {
-        goal: `Calculate: ${payload.expr}`,
-        steps: [
-          {
-            action: 'evaluate_expression',
-            tool: 'calc',
-            params: { expr: payload.expr },
-            reasoning: 'Use calculator to evaluate the mathematical expression',
-          },
-        ],
-        context: { strategy: 'direct_calculation' },
-      },
-    };
-
-    return (
-      plans[category] || {
-        goal: 'Unknown task category',
-        steps: [],
-        context: { strategy: 'fallback' },
-      }
-    );
-  }
-
-  private mockReflect(
-    plan: Plan,
-    results: ExecutionResult[]
-  ): {
-    success: boolean;
-    finalResult: any;
-    adjustments?: string[];
-  } {
-    const successful = results.filter((r) => r.success);
-    const failed = results.filter((r) => !r.success);
-
-    if (successful.length === 0) {
-      return {
-        success: false,
-        finalResult: 'Task failed - no successful steps',
-        adjustments: ['Check tool availability', 'Verify input parameters'],
-      };
-    }
-
-    // Extract result from last successful step
-    const lastSuccess = successful[successful.length - 1];
-    let finalResult = lastSuccess.result;
-
-    // Extract specific values based on result structure
-    if (typeof finalResult === 'object' && finalResult !== null) {
-      if ('text' in finalResult) finalResult = finalResult.text;
-      else if ('label' in finalResult) finalResult = finalResult.label;
-      else if ('value' in finalResult) finalResult = String(finalResult.value);
-      else if ('lastText' in finalResult) finalResult = finalResult.lastText;
-      else if ('snippet' in finalResult) finalResult = finalResult.snippet;
-    }
-
-    return {
-      success: failed.length === 0,
-      finalResult,
-      adjustments: failed.length > 0 ? [`${failed.length} steps failed`] : undefined,
     };
   }
 }

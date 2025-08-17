@@ -30,6 +30,10 @@ pnpm --filter @soup/soup-runner prisma:migrate   # Run migrations
 # Development mode (starts all services)
 pnpm dev                  # Runs all three services concurrently
 
+# Debug logs (created automatically when services run)
+debug.log                 # Main soup-runner debug log  
+llm-debug.log            # LLM planner specific debug log
+
 # Individual services
 pnpm --filter @soup/soup-runner dev        # Main orchestrator (port 3000)
 pnpm --filter @soup/browser-gateway dev    # Browser API (port 3100)
@@ -81,6 +85,16 @@ soup-runner (3000) ←→ browser-gateway (3100) ←→ site-kb (3200)
 - **Config**: Zod-validated environment variables
 
 ## Key Patterns
+
+### Error Handling Philosophy
+
+**NO MOCKS OR FALLBACKS**: When something fails, it should fail gracefully and log the failure. Do not add mock implementations or fallback behaviors. Let failures be visible and debuggable. This applies to:
+- LLM plan parsing failures
+- Tool execution failures  
+- API call failures
+- Any other errors
+
+If an agent can't generate a valid plan or execute a task, it should simply fail with proper logging rather than falling back to mock behavior.
 
 ### Workspace Structure
 
