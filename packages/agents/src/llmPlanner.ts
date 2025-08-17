@@ -198,12 +198,30 @@ Respond with a JSON object in this exact format:
     }
 
     // Validate steps and filter out tools not available to this agent
-    const validSteps = planData.steps.filter((step: any) => {
+    console.log(
+      `[LLMPlanner] Agent ${this.agentId}: Available tools: [${this.availableTools.join(', ')}]`
+    );
+    console.log(`[LLMPlanner] Agent ${this.agentId}: Plan has ${planData.steps.length} steps`);
+
+    const validSteps = planData.steps.filter((step: any, index: number) => {
+      console.log(
+        `[LLMPlanner] Step ${index + 1}: tool="${step.tool}", action="${step.action}", params=${step.params ? 'present' : 'missing'}`
+      );
+
       if (!step.tool || !this.availableTools.includes(step.tool)) {
-        console.log(`[LLMPlanner] Skipping step with unavailable tool: ${step.tool}`);
+        console.log(
+          `[LLMPlanner] ❌ Skipping step ${index + 1} with unavailable tool: ${step.tool}`
+        );
         return false;
       }
-      return step.action && step.params;
+
+      if (!step.action || !step.params) {
+        console.log(`[LLMPlanner] ❌ Skipping step ${index + 1} missing action or params`);
+        return false;
+      }
+
+      console.log(`[LLMPlanner] ✅ Step ${index + 1} is valid`);
+      return true;
     });
 
     if (validSteps.length === 0) {
