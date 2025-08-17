@@ -3,6 +3,7 @@ import { createMCPClient } from './mcpClient';
 import { SummarizationTool } from './tools/langchainSummarization';
 import { ClassificationTool } from './tools/langchainClassification';
 import { calculatorTool } from './tools/langchainCalc';
+import { enhancedRetrievalTool } from './tools/langchainRetrieval';
 
 // Create MCP client singleton if configured
 const mcpClient = createMCPClient();
@@ -11,6 +12,7 @@ const mcpClient = createMCPClient();
 const USE_LANGCHAIN = process.env.LANGCHAIN_ENABLED === 'true';
 const USE_LANGCHAIN_SUMMARIZATION = process.env.LANGCHAIN_SUMMARIZATION !== 'false'; // Default to true if LangChain is enabled
 const USE_LANGCHAIN_CLASSIFICATION = process.env.LANGCHAIN_CLASSIFICATION !== 'false'; // Default to true if LangChain is enabled
+const USE_LANGCHAIN_RETRIEVAL = process.env.LANGCHAIN_RETRIEVAL !== 'false'; // Default to true if LangChain is enabled
 
 export const Tools = {
   async browser(i: { url: string; steps: any[] }) {
@@ -63,6 +65,25 @@ export const Tools = {
   },
 
   async retrieval(i: { query: string; useKnowledgeServer?: boolean }) {
+    // Use enhanced LangChain retrieval if enabled
+    if (USE_LANGCHAIN && USE_LANGCHAIN_RETRIEVAL) {
+      try {
+        console.log('[Tools] Using enhanced LangChain retrieval tool');
+        return await enhancedRetrievalTool.call({
+          query: i.query,
+          maxResults: 3,
+          minSimilarityScore: 0.3,
+          useEmbeddings: true,
+        });
+      } catch (error) {
+        console.error(
+          '[Tools] Enhanced retrieval failed, falling back to legacy implementation:',
+          error
+        );
+        // Continue to fallback methods below
+      }
+    }
+
     // If MCP knowledge server is configured and requested, use it
     if (i.useKnowledgeServer && mcpClient) {
       try {
