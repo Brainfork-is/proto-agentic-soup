@@ -1,12 +1,12 @@
 /**
- * Agents package exports - now using LangGraph
+ * Agents package exports - Pure LangGraph implementation
  */
 
-// Re-export core utilities
+// Core utilities
 export { jobGenerator } from './jobGenerator';
 export { memoryManager } from './agentMemory';
 
-// Export LangGraph agents and utilities
+// LangGraph agents and utilities
 export { LangGraphAgent } from './langgraph/LangGraphAgent';
 export {
   AgentState,
@@ -16,6 +16,3 @@ export {
   type AgentPlan,
 } from './langgraph/agentState';
 export { allTools, toolMap } from './langgraph/tools';
-
-// Keep SimpleAgent for backward compatibility during transition
-export { SimpleAgent } from './SimpleAgent';
