@@ -89,13 +89,30 @@ CRITICAL: Respond with ONLY valid JSON in this exact format:
   ]
 }
 
-Payouts should be random between 5-10. Do not include any text before or after the JSON.`;
+Payouts should be random between 5-10. 
+
+IMPORTANT: 
+- Do NOT wrap in markdown code blocks (no backticks)
+- Do NOT include any text before or after the JSON
+- Return only the raw JSON object
+- Start with { and end with }`;
 
     try {
       console.log('[SimpleJobGenerator] Requesting job batch from LLM...');
 
       const response = await this.llm.invoke(prompt);
-      const jsonResponse = response.content as string;
+      let jsonResponse = response.content as string;
+
+      // Clean up LLM response - remove markdown code blocks
+      jsonResponse = jsonResponse
+        .replace(/```json\s*/, '')
+        .replace(/```\s*$/, '')
+        .trim();
+
+      console.log(
+        '[SimpleJobGenerator] Cleaned JSON response preview:',
+        jsonResponse.substring(0, 200) + '...'
+      );
 
       // Parse JSON response
       const jobBatch: JobBatch = JSON.parse(jsonResponse);
