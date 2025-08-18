@@ -110,31 +110,7 @@ Payouts should be random between 5-10. Do not include any text before or after t
       console.log(`[SimpleJobGenerator] Generated ${jobBatch.jobs.length} jobs in batch`);
     } catch (error) {
       console.error('[SimpleJobGenerator] Failed to generate job batch:', error);
-
-      // Generate diverse fallback jobs if generation fails
-      const fallbackJobs = [
-        'Create a 7-day meal prep plan for someone trying to eat healthier',
-        'Write a brief guide on how to start a small garden indoors',
-        'Compare the features of iPhone vs Samsung Galaxy for photography',
-        'Explain the basics of investing in index funds for beginners',
-        'Create a 30-minute morning routine for productivity',
-        'List 5 effective time management techniques for students',
-        'Write a professional introduction email for a job networking event',
-        'Outline the steps to learn a new programming language from scratch',
-        'Create a checklist for planning a successful virtual meeting',
-        'Explain how to improve credit score in 6 months',
-        'Design a weekly exercise routine for busy professionals',
-        'Write tips for reducing household energy consumption',
-      ];
-
-      // Add fallback jobs to queue
-      const fallbackBatch: SimpleJob[] = fallbackJobs.map((prompt) => ({
-        prompt,
-        payout: 5 + Math.floor(Math.random() * 6), // 5-10 credits
-        deadlineS: 60,
-      }));
-
-      this.jobQueue.push(...fallbackBatch);
+      throw error;
     }
   }
 }
