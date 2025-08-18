@@ -28,7 +28,7 @@ export const Tools = {
       labels?: string[];
       maxWords?: number;
     },
-    agentId?: string
+    _agentId?: string
   ) {
     if (i.mode === 'summarize') {
       // Mock implementation
@@ -114,7 +114,7 @@ export const Tools = {
   // New dedicated classification tool
   async classify(
     i: { text: string; labels: string[]; withConfidence?: boolean },
-    agentId?: string
+    _agentId?: string
   ) {
     // Mock implementation
     return {

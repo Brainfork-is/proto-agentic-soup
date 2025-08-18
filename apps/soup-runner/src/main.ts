@@ -3,7 +3,7 @@ import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 // Prisma is imported dynamically to avoid requiring a generated client in bootstrap mode
 // import { PrismaClient } from '@prisma/client';
-import { nowIso, gini, topKShare, loadRunnerConfig } from '@soup/common';
+import { gini, topKShare, loadRunnerConfig } from '@soup/common';
 import fs from 'fs-extra';
 import path from 'path';
 
@@ -11,7 +11,7 @@ import path from 'path';
 const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
-import { SimpleAgent, SpecializedAgentFactory, jobGenerator } from '@soup/agents';
+import { LangGraphAgent, jobGenerator } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
 const app = Fastify();
@@ -21,40 +21,14 @@ let prisma: any;
 const JOBS_PER_MIN = cfg.JOBS_PER_MIN;
 const EPOCH_MINUTES = cfg.EPOCH_MINUTES;
 const FAIL_PENALTY = cfg.FAIL_PENALTY;
-const STEP_COST = cfg.BROWSER_STEP_COST;
+// const STEP_COST = cfg.BROWSER_STEP_COST;
 
 const RUN_DIR = path.join(process.cwd(), 'runs', String(Date.now()));
 const METRICS_DIR = path.join(RUN_DIR, 'metrics');
-const DEBUG_LOG_FILE = path.join(process.cwd(), 'debug.log');
+// const DEBUG_LOG_FILE = path.join(process.cwd(), 'debug.log');
 fs.ensureDirSync(METRICS_DIR);
 
-// Create a debug logger that writes to both console and file
-class DebugLogger {
-  private logStream: fs.WriteStream;
-
-  constructor() {
-    this.logStream = fs.createWriteStream(DEBUG_LOG_FILE, { flags: 'w' });
-    this.log('='.repeat(80));
-    this.log(`Debug log started at ${new Date().toISOString()}`);
-    this.log(`Process: soup-runner (PID: ${process.pid})`);
-    this.log('='.repeat(80));
-  }
-
-  log(message: string) {
-    const timestamp = new Date().toISOString().substring(11, 23); // HH:mm:ss.SSS
-    const logLine = `[${timestamp}] ${message}`;
-
-    // Write to both console and file
-    console.log(logLine);
-    this.logStream.write(logLine + '\n');
-  }
-
-  close() {
-    this.logStream.end();
-  }
-}
-
-const debugLogger = new DebugLogger();
+// Debug logging functionality removed - using console.log directly
 
 app.get('/leaderboard', async () => {
   const s = await prisma.agentState.findMany();
@@ -736,7 +710,7 @@ app.get('/api/jobs', async () => {
 });
 
 // Debug endpoint for agent lookup
-app.get('/api/debug-agent/:jobId', async (req: any, reply: any) => {
+app.get('/api/debug-agent/:jobId', async (req: any, _reply: any) => {
   const jobId = req.params.jobId;
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) return { error: 'Job not found' };
@@ -820,8 +794,15 @@ app.get('/api/activity', async () => {
 let jobQueue: any;
 
 async function seedIfEmpty() {
-  const agents = await prisma.agentState.findMany();
-  if (agents.length > 0) return;
+  console.log('[seed] Checking if database needs seeding...');
+  try {
+    const agents = await prisma.agentState.findMany();
+    console.log(`[seed] Found ${agents.length} existing agents`);
+    if (agents.length > 0) return;
+  } catch (error) {
+    console.error('[seed] Database query failed:', error);
+    return;
+  }
 
   const seeds = JSON.parse(
     fs.readFileSync(path.join(__dirname, '../../../seeds', 'archetypes.json'), 'utf8')
@@ -1021,8 +1002,10 @@ function grade(cat: string, p: any, artifact: string) {
 
 const agentWorkers: any[] = [];
 async function startAgentWorkers() {
+  console.log('[workers] Starting agent workers...');
   const agents = await prisma.agentState.findMany({ where: { alive: true } });
   const bps = await prisma.blueprint.findMany();
+  console.log(`[workers] Found ${agents.length} alive agents and ${bps.length} blueprints`);
 
   for (const s of agents) {
     const bp = bps.find((b: any) => b.id === s.blueprintId)!;
@@ -1032,15 +1015,9 @@ async function startAgentWorkers() {
       async (job: any) => {
         const started = Date.now();
 
-        // Create specialized agent based on blueprint archetype (Phase 5) with job category fallback
-        const agent = SpecializedAgentFactory.createAgent(
-          s.id,
-          bp.temperature,
-          bp.tools.split(',').filter(Boolean),
-          undefined, // Let factory choose best type
-          job.data.category, // Pass job category for specialization
-          bp.archetype // Pass blueprint archetype (Phase 5 enhancement)
-        );
+        // Create LangGraph agent with Vertex AI - no fallback
+        const agent = new LangGraphAgent(s.id, bp.temperature, bp.tools.split(',').filter(Boolean));
+        console.log(`[Worker] Using LangGraphAgent with Vertex AI for agent ${s.id}`);
 
         console.log(
           `[Worker] Agent ${s.id} (archetype: ${bp.archetype}) processing ${job.data.category} job ${job.data.dbJobId}`
