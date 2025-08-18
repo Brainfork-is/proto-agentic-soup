@@ -146,16 +146,17 @@ export class SimpleReactAgent {
 
 // Factory function to create agents based on blueprint archetype
 export function createAgentForBlueprint(agentId: string, archetype: string): SimpleReactAgent {
-  // Map database archetype values to our AgentArchetype types
-  const archetypeMap: Record<string, AgentArchetype> = {
-    'research-specialist': 'wikipedia',
-    'problem-solver': 'llm-only',
-    'data-analyst': 'web-browser',
-    'memory-expert': 'google-trends',
-  };
+  // Validate archetype is one of our supported types
+  const validArchetypes: AgentArchetype[] = [
+    'llm-only',
+    'web-browser',
+    'wikipedia',
+    'google-trends',
+  ];
+  const isValidArchetype = validArchetypes.includes(archetype as AgentArchetype);
 
-  // Default to llm-only if archetype not recognized
-  const mappedArchetype = archetypeMap[archetype] || 'llm-only';
+  // Use archetype directly (no mapping needed) or default to llm-only
+  const agentArchetype = isValidArchetype ? (archetype as AgentArchetype) : 'llm-only';
 
-  return new SimpleReactAgent(agentId, mappedArchetype);
+  return new SimpleReactAgent(agentId, agentArchetype);
 }
