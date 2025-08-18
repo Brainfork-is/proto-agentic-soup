@@ -27,11 +27,45 @@ export interface UnifiedLLMResponse {
   finishReason: string;
 }
 
+interface QueuedRequest {
+  request: UnifiedLLMRequest;
+  agentId: string;
+  resolve: (value: UnifiedLLMResponse | null) => void;
+  reject: (error: Error) => void;
+  timestamp: number;
+}
+
 export class LLMProvider {
   private primaryProvider: LLMProviderType;
   private fallbackOrder: LLMProviderType[] = [];
   private providerStats: Map<string, { attempts: number; successes: number; totalTokens: number }> =
     new Map();
+
+  // Rate limiting and queuing
+  private requestQueue: QueuedRequest[] = [];
+  private activeRequests: number = 0;
+  private maxConcurrentRequests: number = parseInt(process.env.LLM_MAX_CONCURRENT_REQUESTS || '3');
+  private maxQueueSize: number = parseInt(process.env.LLM_MAX_QUEUE_SIZE || '50');
+  private requestsPerSecond: number = parseFloat(process.env.LLM_REQUESTS_PER_SECOND || '2');
+  private lastRequestTime: number = 0;
+  private processing: boolean = false;
+
+  // Circuit breaker for health monitoring
+  private circuitBreaker: {
+    isOpen: boolean;
+    failureCount: number;
+    consecutiveFailures: number;
+    lastFailureTime: number;
+    maxFailures: number;
+    timeoutMs: number;
+  } = {
+    isOpen: false,
+    failureCount: 0,
+    consecutiveFailures: 0,
+    lastFailureTime: 0,
+    maxFailures: parseInt(process.env.LLM_CIRCUIT_BREAKER_MAX_FAILURES || '5'),
+    timeoutMs: parseInt(process.env.LLM_CIRCUIT_BREAKER_TIMEOUT_MS || '30000'),
+  };
 
   constructor() {
     // Determine primary provider based on environment configuration
@@ -67,33 +101,155 @@ export class LLMProvider {
     request: UnifiedLLMRequest,
     agentId: string
   ): Promise<UnifiedLLMResponse | null> {
-    const provider = request.preferredProvider || this.primaryProvider;
-
-    // Try primary provider first
-    if (provider !== 'auto') {
-      const result = await this.tryProvider(provider, request, agentId);
-      if (result) {
-        this.updateStats(provider, true, result.tokensUsed);
-        return result;
-      }
+    // Check circuit breaker
+    if (this.isCircuitOpen()) {
+      console.warn(`[LLMProvider] Circuit breaker open, rejecting request from ${agentId}`);
+      return null;
     }
 
-    // Try fallback providers in order
-    for (const fallbackProvider of this.fallbackOrder) {
-      if (fallbackProvider === provider) continue; // Skip if already tried
-
-      console.log(`[LLMProvider] Falling back to ${fallbackProvider}`);
-      const result = await this.tryProvider(fallbackProvider, request, agentId);
-      if (result) {
-        this.updateStats(fallbackProvider, true, result.tokensUsed);
-        return result;
+    return new Promise((resolve, reject) => {
+      // Check queue size to prevent memory overflow
+      if (this.requestQueue.length >= this.maxQueueSize) {
+        console.warn(
+          `[LLMProvider] Queue full (${this.maxQueueSize}), rejecting request from ${agentId}`
+        );
+        this.recordFailure();
+        resolve(null);
+        return;
       }
 
-      this.updateStats(fallbackProvider, false, 0);
+      // Add to queue
+      this.requestQueue.push({
+        request,
+        agentId,
+        resolve,
+        reject,
+        timestamp: Date.now(),
+      });
+
+      // Process queue if not already processing
+      this.processQueue();
+    });
+  }
+
+  private isCircuitOpen(): boolean {
+    if (!this.circuitBreaker.isOpen) {
+      return false;
     }
 
-    console.log('[LLMProvider] All providers failed or unavailable');
-    return null;
+    // Check if timeout period has passed
+    const now = Date.now();
+    if (now - this.circuitBreaker.lastFailureTime > this.circuitBreaker.timeoutMs) {
+      console.log('[LLMProvider] Circuit breaker timeout expired, attempting to close');
+      this.circuitBreaker.isOpen = false;
+      this.circuitBreaker.consecutiveFailures = 0;
+      return false;
+    }
+
+    return true;
+  }
+
+  private recordFailure(): void {
+    this.circuitBreaker.failureCount++;
+    this.circuitBreaker.consecutiveFailures++;
+    this.circuitBreaker.lastFailureTime = Date.now();
+
+    if (this.circuitBreaker.consecutiveFailures >= this.circuitBreaker.maxFailures) {
+      console.warn(
+        `[LLMProvider] Circuit breaker opened after ${this.circuitBreaker.consecutiveFailures} consecutive failures`
+      );
+      this.circuitBreaker.isOpen = true;
+    }
+  }
+
+  private recordSuccess(): void {
+    this.circuitBreaker.consecutiveFailures = 0;
+    if (this.circuitBreaker.isOpen) {
+      console.log('[LLMProvider] Circuit breaker closed after successful request');
+      this.circuitBreaker.isOpen = false;
+    }
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.processing) return;
+    this.processing = true;
+
+    while (this.requestQueue.length > 0 && this.activeRequests < this.maxConcurrentRequests) {
+      // Rate limiting: ensure minimum time between requests
+      const now = Date.now();
+      const timeSinceLastRequest = now - this.lastRequestTime;
+      const minInterval = 1000 / this.requestsPerSecond;
+
+      if (timeSinceLastRequest < minInterval) {
+        const delay = minInterval - timeSinceLastRequest;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+
+      const queuedRequest = this.requestQueue.shift();
+      if (!queuedRequest) break;
+
+      // Check if request is too old (timeout)
+      if (now - queuedRequest.timestamp > 30000) {
+        // 30 second timeout
+        console.warn(`[LLMProvider] Request from ${queuedRequest.agentId} timed out in queue`);
+        queuedRequest.resolve(null);
+        continue;
+      }
+
+      this.lastRequestTime = Date.now();
+      this.activeRequests++;
+
+      // Process request asynchronously
+      this.executeRequest(queuedRequest).finally(() => {
+        this.activeRequests--;
+        // Continue processing queue
+        setTimeout(() => this.processQueue(), 0);
+      });
+    }
+
+    this.processing = false;
+  }
+
+  private async executeRequest(queuedRequest: QueuedRequest): Promise<void> {
+    try {
+      const { request, agentId } = queuedRequest;
+      const provider = request.preferredProvider || this.primaryProvider;
+
+      // Try primary provider first
+      if (provider !== 'auto') {
+        const result = await this.tryProvider(provider, request, agentId);
+        if (result) {
+          this.updateStats(provider, true, result.tokensUsed);
+          this.recordSuccess();
+          queuedRequest.resolve(result);
+          return;
+        }
+      }
+
+      // Try fallback providers in order
+      for (const fallbackProvider of this.fallbackOrder) {
+        if (fallbackProvider === provider) continue; // Skip if already tried
+
+        console.log(`[LLMProvider] Falling back to ${fallbackProvider} for ${agentId}`);
+        const result = await this.tryProvider(fallbackProvider, request, agentId);
+        if (result) {
+          this.updateStats(fallbackProvider, true, result.tokensUsed);
+          this.recordSuccess();
+          queuedRequest.resolve(result);
+          return;
+        }
+
+        this.updateStats(fallbackProvider, false, 0);
+      }
+
+      console.log(`[LLMProvider] All providers failed for ${agentId}`);
+      this.recordFailure();
+      queuedRequest.resolve(null);
+    } catch (error) {
+      console.error(`[LLMProvider] Error processing request from ${queuedRequest.agentId}:`, error);
+      this.recordFailure();
+      queuedRequest.resolve(null);
+    }
   }
 
   async generateStructuredContent(
@@ -258,6 +414,26 @@ export class LLMProvider {
             : 0,
       };
     }
+
+    // Add queue and performance stats
+    stats.queue = {
+      queueSize: this.requestQueue.length,
+      activeRequests: this.activeRequests,
+      maxConcurrentRequests: this.maxConcurrentRequests,
+      requestsPerSecond: this.requestsPerSecond,
+      maxQueueSize: this.maxQueueSize,
+    };
+
+    // Add circuit breaker stats
+    stats.circuitBreaker = {
+      isOpen: this.circuitBreaker.isOpen,
+      totalFailures: this.circuitBreaker.failureCount,
+      consecutiveFailures: this.circuitBreaker.consecutiveFailures,
+      lastFailureTime: this.circuitBreaker.lastFailureTime,
+      maxFailures: this.circuitBreaker.maxFailures,
+      timeoutMs: this.circuitBreaker.timeoutMs,
+    };
+
     return stats;
   }
 
