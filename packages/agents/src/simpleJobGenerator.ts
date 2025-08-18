@@ -11,8 +11,14 @@ export interface SimpleJob {
   deadlineS: number;
 }
 
+interface JobBatch {
+  jobs: SimpleJob[];
+}
+
 export class SimpleJobGenerator {
   private llm: ChatVertexAI;
+  private jobQueue: SimpleJob[] = [];
+  private batchSize = 10;
 
   constructor() {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT;
@@ -36,15 +42,27 @@ export class SimpleJobGenerator {
   }
 
   async generateJob(): Promise<SimpleJob> {
-    const prompt = `Generate ONE single, actionable task that an AI agent can complete immediately. You must create only ONE task, not multiple tasks or a list.
+    // Return job from queue if available, otherwise generate new batch
+    if (this.jobQueue.length > 0) {
+      return this.jobQueue.shift()!;
+    }
 
-VARIETY REQUIREMENTS (choose ONE domain):
-- Pick ONE industry: technology, healthcare, education, finance, retail, entertainment, travel, food, etc.
-- Pick ONE task type: research, writing, analysis, planning, creative, problem-solving, etc.
-- Create ONE specific deliverable
-- Either business OR personal use case (not both)
+    // Generate new batch of jobs
+    await this.generateJobBatch();
+    return this.jobQueue.shift()!;
+  }
 
-SINGLE TASK EXAMPLES (pick a style similar to ONE of these):
+  private async generateJobBatch(): Promise<void> {
+    const prompt = `Generate exactly 10 diverse, actionable tasks that AI agents can complete immediately. Return them in JSON format.
+
+VARIETY REQUIREMENTS:
+- Mix different industries: technology, healthcare, education, finance, retail, entertainment, travel, food, etc.
+- Mix task types: research, writing, analysis, planning, creative, problem-solving, etc.
+- Vary complexity and length requirements
+- Include both business and personal use cases
+- Ensure each task is completely different from the others
+
+TASK EXAMPLES (create 10 tasks with similar variety):
 "Create a 5-step employee onboarding checklist for a remote software company"
 "Write 3 different taglines for a sustainable furniture brand"  
 "Compare the pros and cons of electric vs hybrid vehicles for city driving"
@@ -52,33 +70,48 @@ SINGLE TASK EXAMPLES (pick a style similar to ONE of these):
 "Plan a 3-day weekend itinerary for first-time visitors to Tokyo"
 "Write installation instructions for setting up a home WiFi router"
 "Create a monthly budget template for college students"
+"List 8 time management techniques for busy entrepreneurs"
+"Design a morning routine for better productivity"
+"Explain the benefits of meditation for stress relief"
 
-CRITICAL REQUIREMENTS:
-- Generate EXACTLY ONE task only
-- No lists, no multiple items, no "and also do this"
+REQUIREMENTS FOR EACH TASK:
 - Completely self-contained (no placeholders or external references)
-- Specific single deliverable requested
+- Specific deliverable requested
 - Achievable by AI with current tools
+- Clear scope and requirements
 
-IMPORTANT: Respond with only ONE complete task prompt - no explanations, no lists, no additional text.`;
+CRITICAL: Respond with ONLY valid JSON in this exact format:
+{
+  "jobs": [
+    {"prompt": "task description here", "payout": 7, "deadlineS": 60},
+    {"prompt": "another task description", "payout": 6, "deadlineS": 60},
+    ...exactly 10 jobs total
+  ]
+}
+
+Payouts should be random between 5-10. Do not include any text before or after the JSON.`;
 
     try {
-      console.log('[SimpleJobGenerator] Requesting job from LLM...');
+      console.log('[SimpleJobGenerator] Requesting job batch from LLM...');
 
       const response = await this.llm.invoke(prompt);
-      const jobPrompt = response.content as string;
+      const jsonResponse = response.content as string;
 
-      console.log('[SimpleJobGenerator] Generated job:', jobPrompt.substring(0, 100) + '...');
+      // Parse JSON response
+      const jobBatch: JobBatch = JSON.parse(jsonResponse);
 
-      return {
-        prompt: jobPrompt.trim(),
-        payout: 5 + Math.floor(Math.random() * 6), // 5-10 credits
-        deadlineS: 60,
-      };
+      if (!jobBatch.jobs || !Array.isArray(jobBatch.jobs)) {
+        throw new Error('Invalid JSON response format');
+      }
+
+      // Add jobs to queue
+      this.jobQueue.push(...jobBatch.jobs);
+
+      console.log(`[SimpleJobGenerator] Generated ${jobBatch.jobs.length} jobs in batch`);
     } catch (error) {
-      console.error('[SimpleJobGenerator] Failed to generate job:', error);
+      console.error('[SimpleJobGenerator] Failed to generate job batch:', error);
 
-      // Diverse fallback jobs if generation fails
+      // Generate diverse fallback jobs if generation fails
       const fallbackJobs = [
         'Create a 7-day meal prep plan for someone trying to eat healthier',
         'Write a brief guide on how to start a small garden indoors',
@@ -94,11 +127,14 @@ IMPORTANT: Respond with only ONE complete task prompt - no explanations, no list
         'Write tips for reducing household energy consumption',
       ];
 
-      return {
-        prompt: fallbackJobs[Math.floor(Math.random() * fallbackJobs.length)],
-        payout: 5,
+      // Add fallback jobs to queue
+      const fallbackBatch: SimpleJob[] = fallbackJobs.map((prompt) => ({
+        prompt,
+        payout: 5 + Math.floor(Math.random() * 6), // 5-10 credits
         deadlineS: 60,
-      };
+      }));
+
+      this.jobQueue.push(...fallbackBatch);
     }
   }
 }
