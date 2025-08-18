@@ -133,6 +133,7 @@ Make the content interesting and varied. Avoid repetition from previous generati
           if (braceCount === 0 && jsonStart !== -1) {
             jsonEnd = i;
             break;
+            }
           }
         }
       }
@@ -201,7 +202,7 @@ Make the content interesting and varied. Avoid repetition from previous generati
 
   private validatePayload(category: string, payload: any): boolean {
     switch (category) {
-      case 'web_research':
+      case 'web_research':{
         return (
           payload.url &&
           payload.question &&
@@ -209,7 +210,7 @@ Make the content interesting and varied. Avoid repetition from previous generati
           typeof payload.question === 'string'
         );
 
-      case 'summarize':
+      case 'summarize':{
         return (
           payload.text &&
           payload.maxWords &&
@@ -219,7 +220,7 @@ Make the content interesting and varied. Avoid repetition from previous generati
           payload.maxWords <= 30
         );
 
-      case 'classify':
+      case 'classify':{
         return (
           payload.text &&
           payload.labels &&
@@ -230,7 +231,7 @@ Make the content interesting and varied. Avoid repetition from previous generati
           payload.labels.includes(payload.answer)
         );
 
-      case 'math':
+      case 'math':{
         // Allow numbers, basic operations, parentheses, spaces, and decimals only
         return (
           payload.expr &&

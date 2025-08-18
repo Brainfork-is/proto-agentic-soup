@@ -199,18 +199,22 @@ function mockCalculation(expr: string): CalcResult {
 
       let result: number;
       switch (op) {
-        case '+':
+        case '+': {
           result = a + b;
           break;
-        case '-':
+        }
+        case '-': {
           result = a - b;
           break;
-        case '*':
+        }
+        case '*': {
           result = a * b;
           break;
-        case '/':
+        }
+        case '/': {
           result = b !== 0 ? a / b : NaN;
           break;
+        }
         default:
           return { ok: false, method: 'error', explanation: 'Unsupported operation' };
       }
