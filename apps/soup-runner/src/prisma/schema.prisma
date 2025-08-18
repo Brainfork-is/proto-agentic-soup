@@ -13,6 +13,7 @@ model Blueprint {
   llmModel      String
   temperature   Float
   tools         String
+  archetype     String   @default("research-specialist") // Agent specialization type
   coopThreshold Float
   minBalance    Int
   mutationRate  Float

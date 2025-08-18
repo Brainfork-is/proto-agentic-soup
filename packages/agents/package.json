@@ -16,6 +16,8 @@
     "@langchain/community": "^0.3.51",
     "@langchain/core": "^0.3.71",
     "@langchain/google-vertexai": "^0.2.16",
+    "@langchain/langgraph": "^0.4.5",
+    "@langchain/ollama": "^0.2.3",
     "@langchain/openai": "^0.6.7",
     "@langchain/textsplitters": "^0.1.0",
     "@soup/common": "workspace:*",
