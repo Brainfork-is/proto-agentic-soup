@@ -11,13 +11,12 @@ import { RunnableConfig } from '@langchain/core/runnables';
 
 import { AgentState, AgentStateType } from './agentState';
 import { planNode, executeNode, reflectNode } from './nodes';
-import { allTools } from './tools';
+// Tools are imported and used in executeNode
 import { memoryManager } from '../agentMemory';
 
 // Initialize Vertex AI LLM
 function createVertexAILLM() {
   const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-  const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
   const model = process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash';
   const temperature = parseFloat(process.env.VERTEX_AI_TEMPERATURE || '0.7');
   const maxOutputTokens = parseInt(process.env.VERTEX_AI_MAX_OUTPUT_TOKENS || '1000');
@@ -36,8 +35,6 @@ function createVertexAILLM() {
     maxOutputTokens,
     // Add authentication
     authOptions: {
-      projectId,
-      location,
       credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
         ? undefined // Use file path
         : process.env.GOOGLE_CLOUD_CREDENTIALS
@@ -51,8 +48,7 @@ function createVertexAILLM() {
 function createAgentGraph() {
   const llm = createVertexAILLM();
 
-  // Bind tools to the LLM for tool calling
-  const llmWithTools = llm.bindTools(allTools);
+  // Use plain LLM without tool binding (tools handled separately in executeNode)
 
   // Define the workflow nodes with LLM integration
   async function planWithLLM(state: AgentStateType): Promise<Partial<AgentStateType>> {
@@ -60,7 +56,7 @@ function createAgentGraph() {
     const planResult = await planNode(state);
 
     // Then call the LLM to generate the actual plan
-    const response = await llmWithTools.invoke(planResult.messages || []);
+    const response = await llm.invoke(planResult.messages || []);
 
     // Parse the plan from the response
     let plan = null;

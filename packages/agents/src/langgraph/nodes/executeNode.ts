@@ -36,17 +36,29 @@ export async function executeNode(state: AgentStateType): Promise<Partial<AgentS
 
       console.log(`[LangGraph] Executing ${step.tool} with params:`, step.params);
 
-      const result = await tool.invoke(step.params);
+      const rawResult = await tool.invoke(step.params);
+
+      // Parse the JSON result from the tool
+      let result: any;
+      try {
+        result = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult;
+      } catch {
+        result = { success: false, error: 'Failed to parse tool result', rawResult };
+      }
+
+      const success = result.success !== false && !result.error;
+      const error = result.error || (success ? undefined : 'Tool execution failed');
+      const stepsUsed = result.stepsUsed || result.steps || 0;
 
       toolResults.push({
         tool: step.tool,
-        success: !result.error && result.success !== false,
+        success,
         result,
-        error: result.error || (result.success === false ? 'Tool execution failed' : undefined),
-        stepsUsed: result.stepsUsed || result.steps || 0,
+        error,
+        stepsUsed,
       });
 
-      totalStepsUsed += result.stepsUsed || result.steps || 0;
+      totalStepsUsed += stepsUsed;
     } catch (error) {
       toolResults.push({
         tool: step.tool,

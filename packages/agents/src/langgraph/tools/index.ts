@@ -1,165 +1,128 @@
 /**
- * LangGraph Tools - Proper tool calling implementation
- * Uses LangChain's tool system with structured schemas
+ * LangGraph Tools - Ultra-simplified approach
+ * Creates basic tool objects to avoid all TypeScript complexity issues
  */
 
-import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
 import { browserRun } from '../../browserTool';
 import { createMCPClient } from '../../mcpClient';
 
 // Create MCP client singleton if configured
 const mcpClient = createMCPClient();
 
+// Simple tool interface for our use
+interface SimpleTool {
+  name: string;
+  description: string;
+  invoke: (params: any) => Promise<string>;
+}
+
 // Calculator tool
-export const calculatorTool = tool(
-  async ({ expression }: { expression: string }) => {
+export const calculatorTool: SimpleTool = {
+  name: 'calculator',
+  description: 'Evaluate mathematical expressions. Supports +, -, *, /, parentheses.',
+  async invoke({ expression }: { expression: string }) {
     try {
-      // Simple math evaluation (safe for basic expressions)
       const result = eval(expression);
-      return {
-        success: true,
-        value: result,
-        expression,
-      };
+      return JSON.stringify({ success: true, value: result, expression });
     } catch (error) {
-      return {
+      return JSON.stringify({
         success: false,
         error: error instanceof Error ? error.message : 'Invalid expression',
         expression,
-      };
+      });
     }
   },
-  {
-    name: 'calculator',
-    description: 'Evaluate mathematical expressions. Supports +, -, *, /, parentheses.',
-    schema: z.object({
-      expression: z.string().describe('The mathematical expression to evaluate'),
-    }),
-  }
-);
+};
 
 // Text processing tool
-export const textProcessorTool = tool(
-  async ({
-    text,
-    operation,
-    maxWords,
-    labels,
-  }: {
+export const textProcessorTool: SimpleTool = {
+  name: 'text_processor',
+  description: 'Process text with summarization or classification operations',
+  async invoke(params: {
     text: string;
     operation: 'summarize' | 'classify';
     maxWords?: number;
     labels?: string[];
-  }) => {
+  }) {
+    const { text, operation, maxWords, labels } = params;
+
     if (operation === 'summarize') {
-      // Simple summarization by truncating to word limit
       const words = text.split(/\s+/);
       const truncated = words.slice(0, maxWords || 50).join(' ');
-      return {
+      return JSON.stringify({
         success: true,
         operation,
         originalText: text,
         result: truncated,
         wordCount: truncated.split(/\s+/).length,
-      };
+      });
     } else if (operation === 'classify') {
-      // Simple classification - return first label for now
-      // In a real implementation, this would use ML
       const selectedLabel = labels?.[0] || 'Unknown';
-      return {
+      return JSON.stringify({
         success: true,
         operation,
         text,
         labels,
         selectedLabel,
-        confidence: 0.8, // Mock confidence
-      };
+        confidence: 0.8,
+      });
     }
 
-    return {
-      success: false,
-      error: `Unknown operation: ${operation}`,
-    };
+    return JSON.stringify({ success: false, error: `Unknown operation: ${operation}` });
   },
-  {
-    name: 'text_processor',
-    description: 'Process text with summarization or classification operations',
-    schema: z.object({
-      text: z.string().describe('The text to process'),
-      operation: z.enum(['summarize', 'classify']).describe('The operation to perform'),
-      maxWords: z.number().optional().describe('Maximum words for summarization'),
-      labels: z.array(z.string()).optional().describe('Classification labels'),
-    }),
-  }
-);
+};
 
 // Browser tool
-export const browserTool = tool(
-  async ({ url, steps }: { url: string; steps: any[] }) => {
+export const browserTool: SimpleTool = {
+  name: 'browser',
+  description: 'Navigate web pages and extract content using browser automation',
+  async invoke(params: { url: string; steps: any[] }) {
     try {
-      const result = await browserRun({ url, steps });
-      return {
+      const result = await browserRun(params);
+      return JSON.stringify({
         success: !result.error,
-        url,
-        steps: steps.length,
+        url: params.url,
+        steps: params.steps.length,
         stepsUsed: result.stepsUsed || 0,
         content: result.content || '',
         error: result.error,
-      };
+      });
     } catch (error) {
-      return {
+      return JSON.stringify({
         success: false,
-        url,
+        url: params.url,
         error: error instanceof Error ? error.message : 'Browser operation failed',
-      };
+      });
     }
   },
-  {
-    name: 'browser',
-    description: 'Navigate web pages and extract content using browser automation',
-    schema: z.object({
-      url: z.string().describe('The URL to navigate to'),
-      steps: z.array(z.any()).describe('Browser automation steps to execute'),
-    }),
-  }
-);
+};
 
 // Knowledge retrieval tool
-export const retrievalTool = tool(
-  async ({
-    query,
-    useKnowledgeServer,
-    maxResults,
-  }: {
-    query: string;
-    useKnowledgeServer?: boolean;
-    maxResults?: number;
-  }) => {
+export const retrievalTool: SimpleTool = {
+  name: 'knowledge_retrieval',
+  description: 'Search knowledge base for relevant information',
+  async invoke(params: { query: string; useKnowledgeServer?: boolean; maxResults?: number }) {
+    const { query, useKnowledgeServer, maxResults } = params;
+
     // Try MCP knowledge server first if enabled
     if (useKnowledgeServer && mcpClient) {
       try {
-        const response = await mcpClient.search({
-          query,
-          maxResults: maxResults || 3,
-        });
-
+        const response = await mcpClient.search({ query, maxResults: maxResults || 3 });
         if (response.results.length > 0) {
-          return {
+          return JSON.stringify({
             success: true,
             query,
             source: 'mcp',
-            results: response.results.map((r) => ({
+            results: response.results.map((r: any) => ({
               title: r.title,
               content: r.content,
               score: r.score,
             })),
             totalCount: response.totalCount,
-          };
+          });
         }
       } catch (error) {
         console.error('MCP knowledge server error:', error);
-        // Fall through to local KB
       }
     }
 
@@ -173,33 +136,23 @@ export const retrievalTool = tool(
     ];
 
     const hit = kb.find((s) => s.toLowerCase().includes(query.toLowerCase()));
-
-    return {
+    return JSON.stringify({
       success: true,
       query,
       source: 'local',
       results: hit ? [{ content: hit, score: 0.8 }] : [],
       totalCount: hit ? 1 : 0,
-    };
+    });
   },
-  {
-    name: 'knowledge_retrieval',
-    description: 'Search knowledge base for relevant information',
-    schema: z.object({
-      query: z.string().describe('The search query'),
-      useKnowledgeServer: z.boolean().optional().describe('Whether to use remote knowledge server'),
-      maxResults: z.number().optional().describe('Maximum number of results to return'),
-    }),
-  }
-);
+};
 
 // Export all tools as an array for easy use
 export const allTools = [calculatorTool, textProcessorTool, browserTool, retrievalTool];
 
 // Export tool mapping for dynamic access
-export const toolMap = {
+export const toolMap: Record<string, SimpleTool> = {
   calculator: calculatorTool,
   text_processor: textProcessorTool,
   browser: browserTool,
   knowledge_retrieval: retrievalTool,
-} as const;
+};
