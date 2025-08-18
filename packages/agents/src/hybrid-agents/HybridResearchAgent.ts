@@ -13,33 +13,33 @@ export class HybridResearchAgent extends BaseSpecializedAgent {
 
   protected buildSpecializedPlanningPrompt(job: JobData, memoryContext: string): string {
     const availableTools = this.tools.join(', ');
-    
+
     let taskDescription = '';
     switch (job.category) {
-      case 'web_research':{
+      case 'web_research': {
         const { url, question } = job.payload as any;
         taskDescription = `Research the question "${question}" by navigating to ${url} and extracting comprehensive information.`;
         break;
-        }
-        
-      case 'summarize':{
+      }
+
+      case 'summarize': {
         const { text, maxWords } = job.payload as any;
         taskDescription = `Research and summarize the key points from this text in ${maxWords || 50} words: ${text}`;
         break;
-        }
-        
-      case 'classify':{
+      }
+
+      case 'classify': {
         const { labels, answer } = job.payload as any;
         taskDescription = `Research and classify this content into categories: ${labels?.join(', ') || 'appropriate category'}. Content: ${answer}`;
         break;
-        }
-        
-      case 'math':{
+      }
+
+      case 'math': {
         const { expr } = job.payload as any;
         taskDescription = `Research mathematical methods and solve: ${expr}`;
         break;
-        }
-        
+      }
+
       default:
         taskDescription = `Research and complete the ${job.category} task: ${JSON.stringify(job.payload)}`;
     }
@@ -74,9 +74,9 @@ Make sure params match the expected format for each tool.`;
   }
 
   protected buildSpecializedReflectionPrompt(plan: AgentPlan, results: any[]): string {
-    const resultsText = results.map((r, i) => 
-      `Step ${i + 1}: ${r.success ? 'SUCCESS' : 'FAILED'} - ${r.result || r.error}`
-    ).join('\n');
+    const resultsText = results
+      .map((r, i) => `Step ${i + 1}: ${r.success ? 'SUCCESS' : 'FAILED'} - ${r.result || r.error}`)
+      .join('\n');
 
     return `You are a research-specialized AI agent analyzing the results of your research plan.
 
@@ -109,7 +109,7 @@ Focus on providing substantive research findings, not just describing what you d
       }
 
       const plan = JSON.parse(jsonMatch[0]);
-      
+
       if (!plan.goal || !plan.steps || !Array.isArray(plan.steps)) {
         throw new Error('Invalid plan structure');
       }
@@ -119,7 +119,7 @@ Focus on providing substantive research findings, not just describing what you d
         if (!step.tool || !step.params || !step.reasoning) {
           throw new Error('Invalid step structure');
         }
-        
+
         if (!this.tools.includes(step.tool)) {
           throw new Error(`Tool ${step.tool} not available`);
         }
@@ -133,7 +133,10 @@ Focus on providing substantive research findings, not just describing what you d
     }
   }
 
-  protected parseReflectionResponse(content: string, results: any[]): { success: boolean; finalResult: string; adjustments: string[] } {
+  protected parseReflectionResponse(
+    content: string,
+    results: any[]
+  ): { success: boolean; finalResult: string; adjustments: string[] } {
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
@@ -141,47 +144,50 @@ Focus on providing substantive research findings, not just describing what you d
       }
 
       const reflection = JSON.parse(jsonMatch[0]);
-      
+
       return {
         success: reflection.success || false,
         finalResult: reflection.finalResult || 'Research completed',
-        adjustments: reflection.adjustments || []
+        adjustments: reflection.adjustments || [],
       };
     } catch (error) {
       console.error('[HybridResearchAgent] Reflection parsing failed:', error);
-      
+
       // Fallback based on execution success
-      const hasSuccessfulSteps = results.some(r => r.success);
+      const hasSuccessfulSteps = results.some((r) => r.success);
       return {
         success: hasSuccessfulSteps,
-        finalResult: hasSuccessfulSteps ? 'Research completed with partial results' : 'Research failed',
-        adjustments: ['Improve plan parsing', 'Enhance tool usage']
+        finalResult: hasSuccessfulSteps
+          ? 'Research completed with partial results'
+          : 'Research failed',
+        adjustments: ['Improve plan parsing', 'Enhance tool usage'],
       };
     }
   }
 
   private createFallbackPlan(job: JobData): AgentPlan {
     switch (job.category) {
-      case 'web_research':{
+      case 'web_research': {
         const { url, question } = job.payload as any;
         return {
           goal: `Research: ${question}`,
           steps: [
             {
               tool: 'browser',
-              params: { 
-                url: url, 
+              params: {
+                url: url,
                 steps: [
                   { type: 'wait', ms: 1000 },
-                  { type: 'extract', selector: 'body' }
-                ]
+                  { type: 'extract', selector: 'body' },
+                ],
               },
-              reasoning: 'Extract content from the provided URL'
-            }
-          ]
+              reasoning: 'Extract content from the provided URL',
+            },
+          ],
         };
+      }
 
-      case 'summarize':{
+      case 'summarize': {
         const { text, maxWords } = job.payload as any;
         return {
           goal: `Summarize text in ${maxWords || 50} words`,
@@ -189,12 +195,13 @@ Focus on providing substantive research findings, not just describing what you d
             {
               tool: 'stringKit',
               params: { text, mode: 'summarize', maxWords: maxWords || 50 },
-              reasoning: 'Summarize the provided text'
-            }
-          ]
+              reasoning: 'Summarize the provided text',
+            },
+          ],
         };
+      }
 
-      case 'classify':{
+      case 'classify': {
         const { labels, answer } = job.payload as any;
         return {
           goal: 'Classify the content',
@@ -202,12 +209,13 @@ Focus on providing substantive research findings, not just describing what you d
             {
               tool: 'stringKit',
               params: { text: answer, mode: 'classify', labels },
-              reasoning: 'Classify the content into appropriate categories'
-            }
-          ]
+              reasoning: 'Classify the content into appropriate categories',
+            },
+          ],
         };
+      }
 
-      case 'math':{
+      case 'math': {
         const { expr } = job.payload as any;
         return {
           goal: `Calculate: ${expr}`,
@@ -215,15 +223,16 @@ Focus on providing substantive research findings, not just describing what you d
             {
               tool: 'calc',
               params: { expr },
-              reasoning: 'Calculate the mathematical expression'
-            }
-          ]
+              reasoning: 'Calculate the mathematical expression',
+            },
+          ],
         };
+      }
 
       default:
         return {
           goal: `Complete ${job.category} task`,
-          steps: []
+          steps: [],
         };
     }
   }

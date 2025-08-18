@@ -13,42 +13,45 @@ export class HybridRetrievalAgent extends BaseSpecializedAgent {
 
   protected buildSpecializedPlanningPrompt(job: JobData, memoryContext: string): string {
     const availableTools = this.tools.join(', ');
-    
+
     let taskDescription = '';
     let retrievalGuidance = '';
-    
+
     switch (job.category) {
-      case 'web_research':{
+      case 'web_research': {
         const { url, question } = job.payload as any;
         taskDescription = `Retrieve information to research "${question}" and verify by navigating to ${url}`;
-        retrievalGuidance = "Start with knowledge base searches, then use browser tools to verify and supplement findings.";
+        retrievalGuidance =
+          'Start with knowledge base searches, then use browser tools to verify and supplement findings.';
         break;
-        }
-        
-      case 'classify':{
+      }
+
+      case 'classify': {
         const { labels, answer } = job.payload as any;
         taskDescription = `Retrieve classification examples and categorize: "${answer}" into: ${labels?.join(', ') || 'categories'}`;
-        retrievalGuidance = "Search for similar examples and classification criteria in the knowledge base.";
+        retrievalGuidance =
+          'Search for similar examples and classification criteria in the knowledge base.';
         break;
-        }
-        
-      case 'summarize':{
+      }
+
+      case 'summarize': {
         const { text, maxWords } = job.payload as any;
         taskDescription = `Retrieve context and summarize this text in ${maxWords || 50} words: ${text}`;
-        retrievalGuidance = "Use retrieval tools to understand context, then create an informed summary.";
+        retrievalGuidance =
+          'Use retrieval tools to understand context, then create an informed summary.';
         break;
-        }
-        
-      case 'math':{
+      }
+
+      case 'math': {
         const { expr } = job.payload as any;
         taskDescription = `Retrieve mathematical methods and solve: ${expr}`;
-        retrievalGuidance = "Search for relevant mathematical approaches and formulas.";
+        retrievalGuidance = 'Search for relevant mathematical approaches and formulas.';
         break;
-        }
-        
+      }
+
       default:
         taskDescription = `Use retrieval methods for: ${JSON.stringify(job.payload)}`;
-        retrievalGuidance = "Search the knowledge base systematically for relevant information.";
+        retrievalGuidance = 'Search the knowledge base systematically for relevant information.';
     }
 
     return `You are a retrieval-specialized AI agent. You excel at searching knowledge bases,
@@ -82,9 +85,9 @@ Focus on systematic information gathering and synthesis.`;
   }
 
   protected buildSpecializedReflectionPrompt(plan: AgentPlan, results: any[]): string {
-    const resultsText = results.map((r, i) => 
-      `Step ${i + 1}: ${r.success ? 'SUCCESS' : 'FAILED'} - ${r.result || r.error}`
-    ).join('\n');
+    const resultsText = results
+      .map((r, i) => `Step ${i + 1}: ${r.success ? 'SUCCESS' : 'FAILED'} - ${r.result || r.error}`)
+      .join('\n');
 
     return `You are a retrieval-specialized AI agent analyzing your information gathering results.
 
@@ -116,7 +119,7 @@ Provide substantive findings based on retrieved data, not retrieval descriptions
       }
 
       const plan = JSON.parse(jsonMatch[0]);
-      
+
       if (!plan.goal || !plan.steps || !Array.isArray(plan.steps)) {
         throw new Error('Invalid plan structure');
       }
@@ -128,7 +131,10 @@ Provide substantive findings based on retrieved data, not retrieval descriptions
     }
   }
 
-  protected parseReflectionResponse(content: string, results: any[]): { success: boolean; finalResult: string; adjustments: string[] } {
+  protected parseReflectionResponse(
+    content: string,
+    results: any[]
+  ): { success: boolean; finalResult: string; adjustments: string[] } {
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
@@ -136,27 +142,27 @@ Provide substantive findings based on retrieved data, not retrieval descriptions
       }
 
       const reflection = JSON.parse(jsonMatch[0]);
-      
+
       return {
         success: reflection.success || false,
         finalResult: reflection.finalResult || 'Information retrieved',
-        adjustments: reflection.adjustments || []
+        adjustments: reflection.adjustments || [],
       };
     } catch (error) {
       console.error('[HybridRetrievalAgent] Reflection parsing failed:', error);
-      
-      const hasSuccessfulSteps = results.some(r => r.success);
+
+      const hasSuccessfulSteps = results.some((r) => r.success);
       return {
         success: hasSuccessfulSteps,
         finalResult: hasSuccessfulSteps ? 'Information successfully retrieved' : 'Retrieval failed',
-        adjustments: ['Improve search queries', 'Better information synthesis']
+        adjustments: ['Improve search queries', 'Better information synthesis'],
       };
     }
   }
 
   private createFallbackPlan(job: JobData): AgentPlan {
     switch (job.category) {
-      case 'web_research':{
+      case 'web_research': {
         const { url, question } = job.payload as any;
         if (this.tools.includes('retrieval')) {
           return {
@@ -165,17 +171,20 @@ Provide substantive findings based on retrieved data, not retrieval descriptions
               {
                 tool: 'retrieval',
                 params: { query: question, useKnowledgeServer: true },
-                reasoning: 'Search knowledge base for relevant information'
+                reasoning: 'Search knowledge base for relevant information',
               },
               {
                 tool: 'browser',
-                params: { 
-                  url: url, 
-                  steps: [{ type: 'wait', ms: 1000 }, { type: 'extract', selector: 'body' }]
+                params: {
+                  url: url,
+                  steps: [
+                    { type: 'wait', ms: 1000 },
+                    { type: 'extract', selector: 'body' },
+                  ],
                 },
-                reasoning: 'Verify and supplement with web content'
-              }
-            ]
+                reasoning: 'Verify and supplement with web content',
+              },
+            ],
           };
         } else {
           return {
@@ -183,17 +192,21 @@ Provide substantive findings based on retrieved data, not retrieval descriptions
             steps: [
               {
                 tool: 'browser',
-                params: { 
-                  url: url, 
-                  steps: [{ type: 'wait', ms: 1000 }, { type: 'extract', selector: 'body' }]
+                params: {
+                  url: url,
+                  steps: [
+                    { type: 'wait', ms: 1000 },
+                    { type: 'extract', selector: 'body' },
+                  ],
                 },
-                reasoning: 'Extract information from web content'
-              }
-            ]
+                reasoning: 'Extract information from web content',
+              },
+            ],
           };
         }
+      }
 
-      case 'classify':{
+      case 'classify': {
         const { labels, answer } = job.payload as any;
         return {
           goal: 'Retrieve classification guidance',
@@ -201,15 +214,16 @@ Provide substantive findings based on retrieved data, not retrieval descriptions
             {
               tool: 'stringKit',
               params: { text: answer, mode: 'classify', labels },
-              reasoning: 'Use pattern matching for classification'
-            }
-          ]
+              reasoning: 'Use pattern matching for classification',
+            },
+          ],
         };
+      }
 
       default:
         return {
           goal: `Retrieve information for ${job.category}`,
-          steps: []
+          steps: [],
         };
     }
   }

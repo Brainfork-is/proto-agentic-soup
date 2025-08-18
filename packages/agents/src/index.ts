@@ -7,14 +7,6 @@ import { memoryManager } from './agentMemory';
 // Re-export for external use
 export { jobGenerator } from './jobGenerator';
 export { memoryManager } from './agentMemory';
-export { LangGraphAgent } from './langgraph';
-// export { ReActSoupAgent } from './langchain-agents/ReActSoupAgent'; // Temporarily disabled due to TypeScript issues
-
-// Export specialized agents and factory
-export { SimpleReActAgent } from './simple-react-agent/SimpleReActAgent';
-export { SimpleMemoryAgent } from './simple-memory-agent/SimpleMemoryAgent';
-export { SimpleResearchAgent } from './simple-research-agent/SimpleResearchAgent';
-export { SimpleRetrievalAgent } from './simple-retrieval-agent/SimpleRetrievalAgent';
 
 // Export hybrid agents (working tool execution)
 export { HybridReActAgent } from './hybrid-agents/HybridReActAgent';

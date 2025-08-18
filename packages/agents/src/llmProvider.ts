@@ -102,12 +102,17 @@ export class LLMProvider {
   ): Promise<UnifiedLLMResponse | null> {
     // For now, fall back to regular generation with structured prompt
     // In the future, this can be enhanced to use native structured output when available
-    const structuredPrompt = request.prompt + '\n\nRespond with valid JSON matching the required schema. Do not include any additional text or explanations.';
-    
-    const response = await this.generateContent({
-      ...request,
-      prompt: structuredPrompt,
-    }, agentId);
+    const structuredPrompt =
+      request.prompt +
+      '\n\nRespond with valid JSON matching the required schema. Do not include any additional text or explanations.';
+
+    const response = await this.generateContent(
+      {
+        ...request,
+        prompt: structuredPrompt,
+      },
+      agentId
+    );
 
     if (!response) {
       return null;
@@ -116,16 +121,16 @@ export class LLMProvider {
     try {
       // Try to parse as JSON and validate against schema
       let jsonStr = response.content;
-      
+
       // Extract JSON from markdown blocks if present
       const codeBlockMatch = jsonStr.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
       if (codeBlockMatch) {
         jsonStr = codeBlockMatch[1];
       }
-      
+
       const parsed = JSON.parse(jsonStr);
       const validated = request.schema.parse(parsed);
-      
+
       return {
         ...response,
         content: validated, // Return the validated structured data
@@ -133,7 +138,7 @@ export class LLMProvider {
     } catch (error) {
       console.error(`[LLMProvider] Structured output parsing failed:`, error);
       console.error(`[LLMProvider] Raw content:`, response.content);
-      
+
       // Return null to indicate failure rather than throwing
       return null;
     }
@@ -145,11 +150,13 @@ export class LLMProvider {
     agentId: string
   ): Promise<UnifiedLLMResponse | null> {
     switch (provider) {
-      case 'local':{
+      case 'local': {
         return this.tryLocalLLM(request, agentId);
+      }
 
-      case 'vertex':{
+      case 'vertex': {
         return this.tryVertexAI(request, agentId);
+      }
 
       default:
         return null;
