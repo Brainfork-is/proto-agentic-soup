@@ -184,5 +184,8 @@ export class VertexAIClient {
   }
 }
 
-// Singleton instance
-export const vertexClient = new VertexAIClient();
+// Singleton instance with environment variable configuration
+export const vertexClient = new VertexAIClient({
+  maxTokensPerHour: parseInt(process.env.LLM_MAX_TOKENS_PER_HOUR || '100000'),
+  maxTokensPerAgent: parseInt(process.env.LLM_MAX_TOKENS_PER_AGENT || '1000'),
+});

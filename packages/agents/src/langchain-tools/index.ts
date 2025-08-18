@@ -4,11 +4,10 @@
  */
 
 import { DynamicTool } from '@langchain/core/tools';
-import { z } from 'zod';
 import { Tools } from '../tools';
 
 // Browser Tool Adapter
-export const createBrowserTool = (agentId: string) => {
+export const createBrowserTool = (_agentId: string) => {
   return new DynamicTool({
     name: 'browser',
     description:

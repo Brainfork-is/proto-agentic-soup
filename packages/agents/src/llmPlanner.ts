@@ -3,7 +3,23 @@
  * Uses Google Vertex AI for intelligent planning and reflection
  */
 
-import { Plan, PlanStep, ExecutionResult } from './mockPlanner';
+// Types previously from mockPlanner
+interface PlanStep {
+  tool: string;
+  params: Record<string, any>;
+  reasoning: string;
+}
+
+interface Plan {
+  goal: string;
+  steps: PlanStep[];
+}
+
+interface ExecutionResult {
+  success: boolean;
+  artifact?: string;
+  steps: number;
+}
 import { llmProvider } from './llmProvider';
 import { memoryManager } from './agentMemory';
 import fs from 'fs';
