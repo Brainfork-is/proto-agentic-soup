@@ -3,7 +3,7 @@ import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 // Prisma is imported dynamically to avoid requiring a generated client in bootstrap mode
 // import { PrismaClient } from '@prisma/client';
-import { nowIso, gini, topKShare, loadRunnerConfig } from '@soup/common';
+import { gini, topKShare, loadRunnerConfig } from '@soup/common';
 import fs from 'fs-extra';
 import path from 'path';
 
@@ -11,7 +11,7 @@ import path from 'path';
 const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
-import { SimpleAgent, jobGenerator } from '@soup/agents';
+import { LangGraphAgent, jobGenerator } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
 const app = Fastify();
@@ -21,40 +21,14 @@ let prisma: any;
 const JOBS_PER_MIN = cfg.JOBS_PER_MIN;
 const EPOCH_MINUTES = cfg.EPOCH_MINUTES;
 const FAIL_PENALTY = cfg.FAIL_PENALTY;
-const STEP_COST = cfg.BROWSER_STEP_COST;
+// const STEP_COST = cfg.BROWSER_STEP_COST;
 
 const RUN_DIR = path.join(process.cwd(), 'runs', String(Date.now()));
 const METRICS_DIR = path.join(RUN_DIR, 'metrics');
-const DEBUG_LOG_FILE = path.join(process.cwd(), 'debug.log');
+// const DEBUG_LOG_FILE = path.join(process.cwd(), 'debug.log');
 fs.ensureDirSync(METRICS_DIR);
 
-// Create a debug logger that writes to both console and file
-class DebugLogger {
-  private logStream: fs.WriteStream;
-
-  constructor() {
-    this.logStream = fs.createWriteStream(DEBUG_LOG_FILE, { flags: 'w' });
-    this.log('='.repeat(80));
-    this.log(`Debug log started at ${new Date().toISOString()}`);
-    this.log(`Process: soup-runner (PID: ${process.pid})`);
-    this.log('='.repeat(80));
-  }
-
-  log(message: string) {
-    const timestamp = new Date().toISOString().substring(11, 23); // HH:mm:ss.SSS
-    const logLine = `[${timestamp}] ${message}`;
-
-    // Write to both console and file
-    console.log(logLine);
-    this.logStream.write(logLine + '\n');
-  }
-
-  close() {
-    this.logStream.end();
-  }
-}
-
-const debugLogger = new DebugLogger();
+// Debug logging functionality removed - using console.log directly
 
 app.get('/leaderboard', async () => {
   const s = await prisma.agentState.findMany();
@@ -736,7 +710,7 @@ app.get('/api/jobs', async () => {
 });
 
 // Debug endpoint for agent lookup
-app.get('/api/debug-agent/:jobId', async (req: any, reply: any) => {
+app.get('/api/debug-agent/:jobId', async (req: any, _reply: any) => {
   const jobId = req.params.jobId;
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) return { error: 'Job not found' };
@@ -820,8 +794,15 @@ app.get('/api/activity', async () => {
 let jobQueue: any;
 
 async function seedIfEmpty() {
-  const agents = await prisma.agentState.findMany();
-  if (agents.length > 0) return;
+  console.log('[seed] Checking if database needs seeding...');
+  try {
+    const agents = await prisma.agentState.findMany();
+    console.log(`[seed] Found ${agents.length} existing agents`);
+    if (agents.length > 0) return;
+  } catch (error) {
+    console.error('[seed] Database query failed:', error);
+    return;
+  }
 
   const seeds = JSON.parse(
     fs.readFileSync(path.join(__dirname, '../../../seeds', 'archetypes.json'), 'utf8')
@@ -829,21 +810,33 @@ async function seedIfEmpty() {
 
   console.log(`[seed] Creating 60 agents from ${seeds.agents.length} archetypes...`);
 
-  // Create 10 variants for each of the 6 archetypes (60 total agents)
-  for (const archetype of seeds.agents) {
-    for (let variant = 0; variant < 10; variant++) {
-      // Create mutations for each variant
-      const mutatedTemperature = mutateTemperature(archetype.temperature, variant);
-      const mutatedTools = mutateTools(archetype.tools, variant);
-      const mutatedCoopThreshold = mutateCoopThreshold(archetype.coopThreshold, variant);
+  // Create specialized agents with different archetypes for Phase 5 evolution
+  const agentArchetypes = [
+    'research-specialist',
+    'problem-solver',
+    'data-analyst',
+    'memory-expert',
+  ];
 
-      // Create blueprint for this variant
+  // Create 15 variants for each of the 4 specialized archetypes (60 total agents)
+  for (let archetypeIndex = 0; archetypeIndex < agentArchetypes.length; archetypeIndex++) {
+    const archetypeType = agentArchetypes[archetypeIndex];
+    const baseArchetype = seeds.agents[archetypeIndex % seeds.agents.length]; // Rotate through base seeds
+
+    for (let variant = 0; variant < 15; variant++) {
+      // Create mutations for each variant
+      const mutatedTemperature = mutateTemperature(baseArchetype.temperature, variant);
+      const mutatedTools = mutateTools(baseArchetype.tools, variant);
+      const mutatedCoopThreshold = mutateCoopThreshold(baseArchetype.coopThreshold, variant);
+
+      // Create blueprint for this specialized archetype variant
       const blueprint = await prisma.blueprint.create({
         data: {
           version: 1,
-          llmModel: archetype.llmModel,
+          llmModel: baseArchetype.llmModel,
           temperature: mutatedTemperature,
           tools: mutatedTools.join(','),
+          archetype: archetypeType, // Phase 5: Assign specialized archetype
           coopThreshold: mutatedCoopThreshold,
           minBalance: 30,
           mutationRate: 0.15,
@@ -865,7 +858,7 @@ async function seedIfEmpty() {
       });
 
       console.log(
-        `[seed] Created ${archetype.id}_v${variant}: temp=${mutatedTemperature.toFixed(2)}, tools=[${mutatedTools.join(',')}], coop=${mutatedCoopThreshold.toFixed(2)}`
+        `[seed] Created ${archetypeType}_v${variant}: temp=${mutatedTemperature.toFixed(2)}, tools=[${mutatedTools.join(',')}], archetype=${archetypeType}`
       );
     }
   }
@@ -1009,17 +1002,26 @@ function grade(cat: string, p: any, artifact: string) {
 
 const agentWorkers: any[] = [];
 async function startAgentWorkers() {
+  console.log('[workers] Starting agent workers...');
   const agents = await prisma.agentState.findMany({ where: { alive: true } });
   const bps = await prisma.blueprint.findMany();
+  console.log(`[workers] Found ${agents.length} alive agents and ${bps.length} blueprints`);
 
   for (const s of agents) {
     const bp = bps.find((b: any) => b.id === s.blueprintId)!;
-    const agent = new SimpleAgent(s.id, bp.temperature, bp.tools.split(',').filter(Boolean));
 
     const worker = new Worker(
       'jobs',
       async (job: any) => {
         const started = Date.now();
+
+        // Create LangGraph agent with Vertex AI - no fallback
+        const agent = new LangGraphAgent(s.id, bp.temperature, bp.tools.split(',').filter(Boolean));
+        console.log(`[Worker] Using LangGraphAgent with Vertex AI for agent ${s.id}`);
+
+        console.log(
+          `[Worker] Agent ${s.id} (archetype: ${bp.archetype}) processing ${job.data.category} job ${job.data.dbJobId}`
+        );
         const res: any = await agent.handle(job.data);
 
         const steps = res.stepsUsed || 0;
@@ -1106,12 +1108,20 @@ async function epochTick() {
       if (toolsSet.has(t)) toolsSet.delete(t);
       else toolsSet.add(t);
 
+      // Phase 5: Archetype mutation during reproduction
+      const archetypes = ['research-specialist', 'problem-solver', 'data-analyst', 'memory-expert'];
+      const mutatedArchetype =
+        Math.random() < 0.1 // 10% chance of archetype mutation
+          ? archetypes[Math.floor(Math.random() * archetypes.length)]
+          : bp.archetype; // Keep parent's archetype 90% of the time
+
       const child = await prisma.blueprint.create({
         data: {
           version: bp.version + 1,
           llmModel: bp.llmModel,
           temperature: newTemp,
           tools: Array.from(toolsSet).join(','),
+          archetype: mutatedArchetype, // Phase 5: Include archetype with mutation
           coopThreshold: bp.coopThreshold,
           minBalance: bp.minBalance,
           mutationRate: bp.mutationRate,

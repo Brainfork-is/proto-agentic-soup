@@ -1,0 +1,251 @@
+/**
+ * ReActAgent wrapper for Soup Runner integration
+ * Uses LangGraph's prebuilt ReActAgent with our custom tools
+ */
+
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { JobData } from '@soup/common';
+import { memoryManager } from '../agentMemory';
+import { createToolsForAgent } from '../langchain-tools';
+import { llmProvider } from '../llmProvider';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+
+// LLM wrapper that implements function calling for ReActAgent
+class SoupLLMWrapper extends BaseChatModel {
+  private agentId: string;
+  private temperature: number;
+  private boundTools: any[] = [];
+
+  constructor(agentId: string, temperature: number = 0.7) {
+    super({});
+    this.agentId = agentId;
+    this.temperature = temperature;
+  }
+
+  async _generate(messages: any[], options?: any) {
+    // Convert LangChain messages to our prompt format
+    let prompt = messages.map((msg: any) => {
+      if (msg._getType() === 'system') return `System: ${msg.content}`;
+      if (msg._getType() === 'human') return `Human: ${msg.content}`;
+      if (msg._getType() === 'ai') return `Assistant: ${msg.content}`;
+      return msg.content;
+    }).join('\n\n');
+
+    // Add tool information if tools are bound
+    if (this.boundTools.length > 0) {
+      const toolDescriptions = this.boundTools.map(tool => 
+        `- ${tool.name}: ${tool.description}`
+      ).join('\n');
+      
+      prompt += `\n\nAvailable tools:\n${toolDescriptions}\n\nTo use a tool, respond with: TOOL_CALL: {"name": "tool_name", "arguments": {...}}`;
+    }
+
+    const response = await llmProvider.generateContent({
+      prompt,
+      temperature: this.temperature,
+      maxTokens: 1000,
+    }, this.agentId);
+
+    if (!response) {
+      throw new Error('No response from LLM provider');
+    }
+
+    // Check if the response contains a tool call
+    const toolCallMatch = response.content.match(/TOOL_CALL:\s*(\{.*\})/);
+    if (toolCallMatch && this.boundTools.length > 0) {
+      try {
+        const toolCall = JSON.parse(toolCallMatch[1]);
+        const tool = this.boundTools.find(t => t.name === toolCall.name);
+        
+        if (tool) {
+          // Execute the tool
+          const toolResult = await tool.func(JSON.stringify(toolCall.arguments));
+          
+          // Return a message with tool call and result
+          const toolMessage = new HumanMessage(
+            `Used ${toolCall.name} with arguments ${JSON.stringify(toolCall.arguments)}. Result: ${toolResult}`
+          );
+          
+          return {
+            generations: [{
+              text: toolMessage.content,
+              message: toolMessage,
+            }],
+            llmOutput: {
+              tokenUsage: {
+                totalTokens: response.tokensUsed,
+              }
+            }
+          };
+        }
+      } catch (error) {
+        console.warn('[SoupLLMWrapper] Failed to parse tool call:', error);
+      }
+    }
+
+    return {
+      generations: [{
+        text: response.content,
+        message: new HumanMessage(response.content),
+      }],
+      llmOutput: {
+        tokenUsage: {
+          totalTokens: response.tokensUsed,
+        }
+      }
+    };
+  }
+
+  // Required for ReActAgent - tool binding capability
+  bindTools(tools: any[]) {
+    this.boundTools = tools;
+    return this; // Return self to enable chaining
+  }
+
+  _llmType(): string {
+    return 'soup-llm';
+  }
+
+  async *_streamResponseChunks() {
+    throw new Error('Streaming not implemented');
+  }
+}
+
+export class ReActSoupAgent {
+  id: string;
+  temperature: number;
+  tools: string[];
+  private agent: any;
+  private llm: SoupLLMWrapper;
+
+  constructor(id: string, temperature: number, tools: string[]) {
+    this.id = id;
+    this.temperature = temperature;
+    this.tools = tools;
+    
+    // Create LLM wrapper
+    this.llm = new SoupLLMWrapper(id, temperature);
+    
+    // Create LangChain tools
+    const langchainTools = createToolsForAgent(id, tools);
+    
+    // Create ReAct agent
+    this.agent = createReactAgent({
+      llm: this.llm,
+      tools: langchainTools,
+    });
+  }
+
+  async handle(job: JobData) {
+    try {
+      console.log(`[ReActSoupAgent] Agent ${this.id} handling ${job.category} job`);
+      
+      // Get agent memory for context
+      const memory = memoryManager.getMemory(this.id);
+      const memoryContext = memory.generateContext();
+      
+      // Build task prompt
+      const taskPrompt = this.buildTaskPrompt(job, memoryContext);
+      
+      // Invoke ReAct agent
+      const startTime = Date.now();
+      const result = await this.agent.invoke({
+        messages: [new HumanMessage(taskPrompt)]
+      });
+      
+      const duration = Date.now() - startTime;
+      
+      // Extract final response from agent messages
+      const messages = result.messages || [];
+      const lastMessage = messages[messages.length - 1];
+      const finalOutput = lastMessage?.content || 'Task completed';
+      
+      // Determine success based on whether we got a meaningful response
+      const success = finalOutput && finalOutput.length > 10 && !finalOutput.includes('error');
+      
+      // Store experience in memory
+      memory.remember({
+        category: job.category,
+        payload: job.payload,
+        success,
+        artifact: finalOutput,
+        stepsUsed: 0, // ReAct agent doesn't track steps the same way
+        planUsed: `ReAct reasoning for ${job.category}`,
+        adjustments: success ? [] : ['Consider different approach'],
+      });
+      
+      console.log(`[ReActSoupAgent] Agent ${this.id} completed ${job.category} in ${duration}ms - Success: ${success}`);
+      
+      return {
+        ok: success,
+        artifact: finalOutput,
+        stepsUsed: 0, // ReAct handles its own step counting
+        planUsed: `ReAct reasoning for ${job.category}`,
+        adjustments: success ? [] : ['Consider different approach'],
+      };
+      
+    } catch (error) {
+      console.error(`[ReActSoupAgent] Agent ${this.id} failed:`, error);
+      
+      // Store failure in memory
+      const memory = memoryManager.getMemory(this.id);
+      memory.remember({
+        category: job.category,
+        payload: job.payload,
+        success: false,
+        artifact: `Failed: ${error}`,
+        stepsUsed: 0,
+        planUsed: 'Failed to plan',
+        adjustments: ['Fix ReAct agent integration', 'Check tool compatibility'],
+      });
+      
+      return {
+        ok: false,
+        artifact: `Agent failed: ${error}`,
+        stepsUsed: 0,
+        planUsed: 'Failed to plan',
+        adjustments: ['Fix ReAct agent integration'],
+      };
+    }
+  }
+
+  private buildTaskPrompt(job: JobData, memoryContext: string): string {
+    const availableTools = this.tools.join(', ');
+    
+    let taskDescription = '';
+    switch (job.category) {
+      case 'web_research':
+        const { url, question } = job.payload as any;
+        taskDescription = `Research the question "${question}" by navigating to ${url} and extracting relevant information.`;
+        break;
+        
+      case 'math':
+        const { expr } = job.payload as any;
+        taskDescription = `Calculate the mathematical expression: ${expr}`;
+        break;
+        
+      case 'summarize':
+        const { text, maxWords } = job.payload as any;
+        taskDescription = `Summarize the following text in ${maxWords || 50} words or less: ${text}`;
+        break;
+        
+      case 'classify':
+        const { labels, answer } = job.payload as any;
+        taskDescription = `Classify the content into one of these categories: ${labels?.join(', ') || 'appropriate category'}. Content: ${answer}`;
+        break;
+        
+      default:
+        taskDescription = `Complete the ${job.category} task with payload: ${JSON.stringify(job.payload)}`;
+    }
+    
+    return `You are an AI agent with access to these tools: ${availableTools}
+
+AGENT MEMORY:
+${memoryContext}
+
+TASK: ${taskDescription}
+
+Use the available tools to complete this task efficiently. Think step by step and explain your reasoning.`;
+  }
+}

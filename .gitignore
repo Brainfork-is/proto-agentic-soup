@@ -52,3 +52,6 @@ log/
 tmp/
 temp/
 .cache/
+
+# Secrets Folder
+secrets

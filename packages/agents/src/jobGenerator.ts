@@ -1,8 +1,9 @@
 /**
  * LLM-powered job generator for creating diverse, dynamic tasks
+ * Uses Vertex AI exclusively via LangChain integration
  */
 
-import { llmProvider } from './llmProvider';
+import { ChatVertexAI } from '@langchain/google-vertexai';
 
 export interface GeneratedJob {
   category: 'web_research' | 'summarize' | 'classify' | 'math';
@@ -14,6 +15,28 @@ export interface GeneratedJob {
 export class JobGenerator {
   private agentId: string = 'job-generator';
   private templates: Record<string, string>;
+
+  private createVertexAILLM() {
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT;
+    const model = process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash';
+
+    if (!projectId) {
+      throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
+    }
+
+    return new ChatVertexAI({
+      model,
+      temperature: 0.8, // Higher temperature for variety
+      maxOutputTokens: 400,
+      authOptions: {
+        credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
+          ? undefined
+          : process.env.GOOGLE_CLOUD_CREDENTIALS
+            ? JSON.parse(Buffer.from(process.env.GOOGLE_CLOUD_CREDENTIALS, 'base64').toString())
+            : undefined,
+      },
+    });
+  }
 
   constructor() {
     this.templates = {
@@ -82,7 +105,7 @@ Example: {"expr": "2 + 3 * (4 - 1) / 2"}`,
     const categories = ['web_research', 'summarize', 'classify', 'math'] as const;
     const category = categories[Math.floor(Math.random() * categories.length)];
 
-    // LLM generation only - for local LLM without token limits
+    // LLM generation only - no fallback
     const llmJob = await this.generateLLMJob(category);
     if (!llmJob) {
       throw new Error(`Failed to generate ${category} job with LLM`);
@@ -96,25 +119,21 @@ Example: {"expr": "2 + 3 * (4 - 1) / 2"}`,
 
 Make the content interesting and varied. Avoid repetition from previous generations.`;
 
-    console.log(`[JobGenerator] Requesting ${category} job from LLM...`);
+    console.log(`[JobGenerator] Requesting ${category} job from Vertex AI...`);
 
-    const response = await llmProvider.generateContent(
-      {
-        prompt,
-        temperature: 0.8, // Higher temperature for more variety
-        maxTokens: 400,
-      },
-      this.agentId
-    );
+    // Use ChatVertexAI directly (same config as LangGraphAgent)
+    const llm = this.createVertexAILLM();
+    const response = await llm.invoke(prompt);
 
-    if (!response) {
-      console.error(`[JobGenerator] LLM returned null response for ${category}`);
+    if (!response || !response.content) {
+      console.error(`[JobGenerator] Vertex AI returned null response for ${category}`);
       return null;
     }
 
+    const content = response.content as string;
     console.log(
-      `[JobGenerator] LLM response for ${category} (${response.tokensUsed} tokens):`,
-      response.content.substring(0, 200) + '...'
+      `[JobGenerator] Vertex AI response for ${category}:`,
+      content.substring(0, 200) + '...'
     );
 
     try {
@@ -123,8 +142,8 @@ Make the content interesting and varied. Avoid repetition from previous generati
       let jsonStart = -1;
       let jsonEnd = -1;
 
-      for (let i = 0; i < response.content.length; i++) {
-        const char = response.content[i];
+      for (let i = 0; i < content.length; i++) {
+        const char = content[i];
         if (char === '{') {
           if (jsonStart === -1) jsonStart = i;
           braceCount++;
@@ -139,13 +158,13 @@ Make the content interesting and varied. Avoid repetition from previous generati
 
       if (jsonStart === -1 || jsonEnd === -1) {
         console.error(
-          `[JobGenerator] No valid JSON found in LLM response for ${category}. Full response:`,
-          response.content
+          `[JobGenerator] No valid JSON found in Vertex AI response for ${category}. Full response:`,
+          content
         );
         throw new Error('No complete JSON found in response');
       }
 
-      const jsonStr = response.content.substring(jsonStart, jsonEnd + 1);
+      const jsonStr = content.substring(jsonStart, jsonEnd + 1);
       console.log(`[JobGenerator] Extracted JSON string for ${category}:`, jsonStr);
 
       const payload = JSON.parse(jsonStr);
@@ -156,7 +175,7 @@ Make the content interesting and varied. Avoid repetition from previous generati
         console.error(`[JobGenerator] Validation failed for ${category}. Expected structure:`);
         this.logExpectedStructure(category);
         console.error(`[JobGenerator] Received payload:`, JSON.stringify(payload, null, 2));
-        console.error(`[JobGenerator] Full LLM response was:`, response.content);
+        console.error(`[JobGenerator] Full Vertex AI response was:`, content);
         throw new Error('Invalid payload structure');
       }
 
@@ -201,15 +220,16 @@ Make the content interesting and varied. Avoid repetition from previous generati
 
   private validatePayload(category: string, payload: any): boolean {
     switch (category) {
-      case 'web_research':
+      case 'web_research': {
         return (
           payload.url &&
           payload.question &&
           typeof payload.url === 'string' &&
           typeof payload.question === 'string'
         );
+      }
 
-      case 'summarize':
+      case 'summarize': {
         return (
           payload.text &&
           payload.maxWords &&
@@ -218,8 +238,9 @@ Make the content interesting and varied. Avoid repetition from previous generati
           payload.maxWords > 0 &&
           payload.maxWords <= 30
         );
+      }
 
-      case 'classify':
+      case 'classify': {
         return (
           payload.text &&
           payload.labels &&
@@ -229,47 +250,23 @@ Make the content interesting and varied. Avoid repetition from previous generati
           payload.labels.length > 1 &&
           payload.labels.includes(payload.answer)
         );
+      }
 
-      case 'math':
+      case 'math': {
         // Allow numbers, basic operations, parentheses, spaces, and decimals only
         return (
           payload.expr &&
           typeof payload.expr === 'string' &&
           /^[0-9+\-*/().\s]+$/.test(payload.expr)
         );
+      }
 
       default:
         return false;
     }
   }
 
-  private generateStaticJob(category: string): GeneratedJob {
-    const staticJobs: Record<string, any> = {
-      web_research: {
-        url: 'http://localhost:3200/docs/vector-db.html',
-        question: 'Name one advantage of PGVector.',
-      },
-      summarize: {
-        text: 'RAG fetches documents to ground responses in facts.',
-        maxWords: 12,
-      },
-      classify: {
-        text: 'Milvus supports sharding and replication.',
-        labels: ['DB', 'Not-DB', 'Unknown'],
-        answer: 'DB',
-      },
-      math: {
-        expr: '2 + 2 * 3',
-      },
-    };
-
-    return {
-      category: category as any,
-      payload: staticJobs[category],
-      payout: 5 + Math.floor(Math.random() * 6),
-      deadlineS: 60,
-    };
-  }
+  // No backup/static job generation - LLM only
 }
 
 // Singleton instance
