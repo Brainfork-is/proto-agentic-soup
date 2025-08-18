@@ -574,15 +574,10 @@ app.get('/api/agents', async () => {
   return agents.map((agent: any) => {
     const blueprint: any = blueprintMap.get(agent.blueprintId);
 
-    // Map database archetypes to actual agent tool names for display
+    // Validate archetype or default to llm-only
     const getToolsForArchetype = (archetype: string): string => {
-      const archetypeMap: Record<string, string> = {
-        'research-specialist': 'wikipedia',
-        'problem-solver': 'llm-only',
-        'data-analyst': 'web-browser',
-        'memory-expert': 'google-trends',
-      };
-      return archetypeMap[archetype] || 'llm-only';
+      const validTools = ['wikipedia', 'llm-only', 'web-browser', 'google-trends'];
+      return validTools.includes(archetype) ? archetype : 'llm-only';
     };
 
     return {
@@ -594,7 +589,7 @@ app.get('/api/agents', async () => {
       reputation: agent.reputation,
       meanTtcSec: agent.meanTtcSec,
       temperature: blueprint?.temperature || 0,
-      tools: getToolsForArchetype(blueprint?.archetype || 'problem-solver'),
+      tools: getToolsForArchetype(blueprint?.archetype || 'llm-only'),
       llmModel: blueprint?.llmModel || 'unknown',
     };
   });
@@ -669,21 +664,21 @@ app.get('/api/jobs', async () => {
                         where: { id: agent.blueprintId },
                       });
                       if (blueprint) {
-                        // Map database archetypes to actual agent tool names for display
+                        // Validate archetype or default to llm-only
                         const getToolsForArchetype = (archetype: string): string[] => {
-                          const archetypeMap: Record<string, string[]> = {
-                            'research-specialist': ['wikipedia'],
-                            'problem-solver': ['llm-only'],
-                            'data-analyst': ['web-browser'],
-                            'memory-expert': ['google-trends'],
-                          };
-                          return archetypeMap[archetype] || ['llm-only'];
+                          const validTools = [
+                            'wikipedia',
+                            'llm-only',
+                            'web-browser',
+                            'google-trends',
+                          ];
+                          return validTools.includes(archetype) ? [archetype] : ['llm-only'];
                         };
 
                         agentInfo = {
                           id: agent.id.substring(0, 8) + '...',
                           temperature: blueprint.temperature,
-                          tools: getToolsForArchetype(blueprint.archetype || 'problem-solver'),
+                          tools: getToolsForArchetype(blueprint.archetype || 'llm-only'),
                           llmModel: blueprint.llmModel,
                           balance: agent.balance,
                           successRate:
@@ -833,13 +828,8 @@ async function seedIfEmpty() {
 
   console.log(`[seed] Creating 60 agents from ${seeds.agents.length} archetypes...`);
 
-  // Create specialized agents with different archetypes for Phase 5 evolution
-  const agentArchetypes = [
-    'research-specialist',
-    'problem-solver',
-    'data-analyst',
-    'memory-expert',
-  ];
+  // Create agents with tool-based archetypes (matching SimpleReactAgent types)
+  const agentArchetypes = ['wikipedia', 'llm-only', 'web-browser', 'google-trends'];
 
   // Create 15 variants for each of the 4 specialized archetypes (60 total agents)
   for (let archetypeIndex = 0; archetypeIndex < agentArchetypes.length; archetypeIndex++) {
@@ -1129,8 +1119,8 @@ async function epochTick() {
       if (toolsSet.has(t)) toolsSet.delete(t);
       else toolsSet.add(t);
 
-      // Phase 5: Archetype mutation during reproduction
-      const archetypes = ['research-specialist', 'problem-solver', 'data-analyst', 'memory-expert'];
+      // Archetype mutation during reproduction (using tool names)
+      const archetypes = ['wikipedia', 'llm-only', 'web-browser', 'google-trends'];
       const mutatedArchetype =
         Math.random() < 0.1 // 10% chance of archetype mutation
           ? archetypes[Math.floor(Math.random() * archetypes.length)]

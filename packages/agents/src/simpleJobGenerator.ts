@@ -36,27 +36,32 @@ export class SimpleJobGenerator {
   }
 
   async generateJob(): Promise<SimpleJob> {
-    const prompt = `Please respond with a complete, actionable job that an AI agent can perform immediately. The job should be specific and contain all necessary information - no placeholders, no "[insert X here]", no references to external documents or transcripts.
+    const prompt = `Generate a diverse, actionable task that an AI agent can complete immediately. Create tasks across different domains and avoid repetition.
 
-Examples of GOOD jobs:
-- "Write a 300-word blog post about the benefits of remote work for small businesses"
-- "Create a social media marketing plan for a coffee shop, including 5 post ideas and posting schedule"
-- "Research and compare the features of Tesla Model 3 vs Toyota Prius"
-- "Draft a professional email to customers announcing a 20% off sale this weekend"
+VARIETY REQUIREMENTS:
+- Mix different industries: technology, healthcare, education, finance, retail, entertainment, travel, food, etc.
+- Mix task types: research, writing, analysis, planning, creative, problem-solving, etc.
+- Vary complexity and length requirements
+- Include both business and personal use cases
 
-Examples of BAD jobs (avoid these):
-- "Summarize this research paper [insert link]"
-- "Analyze the transcript [insert transcript here]" 
-- "Review the document attached"
+EXAMPLES across different domains:
+Business: "Create a 5-step employee onboarding checklist for a remote software company"
+Creative: "Write 3 different taglines for a sustainable furniture brand"
+Research: "Compare the pros and cons of electric vs hybrid vehicles for city driving"
+Education: "Explain cryptocurrency basics for teenagers in simple terms"
+Health: "List 10 desk exercises for office workers with time estimates"
+Travel: "Plan a 3-day weekend itinerary for first-time visitors to Tokyo"
+Technology: "Write installation instructions for setting up a home WiFi router"
+Finance: "Create a monthly budget template for college students"
 
-Requirements:
-- Job must be completely self-contained
-- No external references or placeholders
-- Specific and actionable
-- Suitable for general public or business users
-- Can be completed by an AI agent with available tools
+REQUIREMENTS:
+- Completely self-contained (no placeholders or external references)
+- Specific deliverable requested
+- Achievable by AI with current tools
+- Clear scope and requirements
+- Avoid repeating similar topics or formats
 
-IMPORTANT: Only respond with the complete job prompt itself, no additional text or explanation.`;
+IMPORTANT: Respond with only the task prompt - no explanations or additional text.`;
 
     try {
       console.log('[SimpleJobGenerator] Requesting job from LLM...');
@@ -74,16 +79,20 @@ IMPORTANT: Only respond with the complete job prompt itself, no additional text 
     } catch (error) {
       console.error('[SimpleJobGenerator] Failed to generate job:', error);
 
-      // Fallback job if generation fails
+      // Diverse fallback jobs if generation fails
       const fallbackJobs = [
-        "What's the current weather in New York?",
-        'Summarize the latest news about artificial intelligence',
-        'Find the top 3 trending topics on social media today',
-        'Explain the concept of quantum computing in simple terms',
-        'What are the best practices for remote team management?',
-        'Research the current stock price of Apple',
-        'What are the main benefits of cloud computing?',
-        'Find information about the latest SpaceX launch',
+        'Create a 7-day meal prep plan for someone trying to eat healthier',
+        'Write a brief guide on how to start a small garden indoors',
+        'Compare the features of iPhone vs Samsung Galaxy for photography',
+        'Explain the basics of investing in index funds for beginners',
+        'Create a 30-minute morning routine for productivity',
+        'List 5 effective time management techniques for students',
+        'Write a professional introduction email for a job networking event',
+        'Outline the steps to learn a new programming language from scratch',
+        'Create a checklist for planning a successful virtual meeting',
+        'Explain how to improve credit score in 6 months',
+        'Design a weekly exercise routine for busy professionals',
+        'Write tips for reducing household energy consumption',
       ];
 
       return {
