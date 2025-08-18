@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Agentic Soup is an experimental TypeScript/Node.js system that simulates "survival of the fittest" dynamics among software agents competing for deterministic jobs. It uses a microservices architecture with three main services (soup-runner, browser-gateway, site-kb) backed by Redis and SQLite.
+Agentic Soup is an experimental TypeScript/Node.js system that simulates "survival of the fittest" dynamics among LangGraph.js software agents competing for LLM-generated jobs. It uses a microservices architecture with three main services (soup-runner, browser-gateway, site-kb) backed by Redis and SQLite, with Google Vertex AI providing the intelligence layer.
 
 ## Development Commands
 
@@ -30,9 +30,8 @@ pnpm --filter @soup/soup-runner prisma:migrate   # Run migrations
 # Development mode (starts all services)
 pnpm dev                  # Runs all three services concurrently
 
-# Debug logs (created automatically when services run)
-debug.log                 # Main soup-runner debug log  
-llm-debug.log            # LLM planner specific debug log
+# Debug logs are written to console and files
+# System automatically creates debug output for monitoring
 
 # Individual services
 pnpm --filter @soup/soup-runner dev        # Main orchestrator (port 3000)
@@ -132,12 +131,12 @@ Jobs are processed through BullMQ queues with deterministic grading:
 
 ### Agent Tools
 
-Agents have access to standardized tools:
+LangGraph agents have access to structured tools with proper Zod schemas:
 
-- `browser`: Navigate and extract from site-kb
-- `retrieval`: Search knowledge base
-- `stringKit`: Text manipulation
-- `calc`: Math operations
+- `calculator`: Mathematical expression evaluation
+- `text_processor`: Summarization and classification operations  
+- `browser`: Web navigation and content extraction
+- `knowledge_retrieval`: Knowledge base search with MCP integration
 
 ## Development Guidelines
 
@@ -149,10 +148,11 @@ Agents have access to standardized tools:
 
 ### Adding New Features
 
-1. For new job types: Add grader in `apps/soup-runner/src/services/graders/`
-2. For new agent tools: Implement in `packages/agents/src/tools/`
+1. For new job types: Add grader in `apps/soup-runner/src/services/graders/` and update JobGenerator templates
+2. For new agent tools: Implement in `packages/agents/src/langgraph/tools/index.ts` with proper Zod schemas
 3. For new agent archetypes: Add to `seeds/archetypes.json`
 4. For schema changes: Edit `apps/soup-runner/src/prisma/schema.prisma` and run migrations
+5. For workflow changes: Modify nodes in `packages/agents/src/langgraph/nodes/`
 
 ### Common Tasks
 
@@ -166,8 +166,11 @@ Agents have access to standardized tools:
 - `apps/soup-runner/src/prisma/schema.prisma`: Database schema
 - `packages/common/src/config.ts`: Environment configuration schema
 - `seeds/archetypes.json`: Initial agent definitions
-- `apps/soup-runner/src/index.ts`: Main orchestrator entry point
+- `apps/soup-runner/src/main.ts`: Main orchestrator entry point
+- `packages/agents/src/langgraph/LangGraphAgent.ts`: Core agent implementation
+- `packages/agents/src/jobGenerator.ts`: Vertex AI job generation
 - `.env.example`: Environment variable template
+- `docs/VERTEX_AI_CONFIGURATION.md`: Vertex AI setup guide
 
 ## Important Notes for Claude Code
 
