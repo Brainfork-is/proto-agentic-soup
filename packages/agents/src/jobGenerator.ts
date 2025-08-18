@@ -18,7 +18,6 @@ export class JobGenerator {
 
   private createVertexAILLM() {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-    const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
     const model = process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash';
 
     if (!projectId) {
@@ -30,8 +29,6 @@ export class JobGenerator {
       temperature: 0.8, // Higher temperature for variety
       maxOutputTokens: 400,
       authOptions: {
-        projectId,
-        location,
         credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
           ? undefined
           : process.env.GOOGLE_CLOUD_CREDENTIALS
