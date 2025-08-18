@@ -13,42 +13,46 @@ export class HybridMemoryAgent extends BaseSpecializedAgent {
 
   protected buildSpecializedPlanningPrompt(job: JobData, memoryContext: string): string {
     const availableTools = this.tools.join(', ');
-    
+
     let taskDescription = '';
     let memoryGuidance = '';
-    
+
     switch (job.category) {
-      case 'summarize':{
+      case 'summarize': {
         const { text, maxWords } = job.payload as any;
         taskDescription = `Summarize the following text in ${maxWords || 50} words or less: ${text}`;
-        memoryGuidance = "Use your memory of previous summarization tasks to identify key patterns and important information types.";
+        memoryGuidance =
+          'Use your memory of previous summarization tasks to identify key patterns and important information types.';
         break;
-        }
-        
-      case 'classify':{
+      }
+
+      case 'classify': {
         const { labels, answer } = job.payload as any;
         taskDescription = `Classify the content into one of these categories: ${labels?.join(', ') || 'appropriate category'}. Content: ${answer}`;
-        memoryGuidance = "Leverage your memory of previous classifications to identify distinguishing features and patterns.";
+        memoryGuidance =
+          'Leverage your memory of previous classifications to identify distinguishing features and patterns.';
         break;
-        }
-        
-      case 'web_research':{
+      }
+
+      case 'web_research': {
         const { url, question } = job.payload as any;
         taskDescription = `Research "${question}" by navigating to ${url} and extracting relevant information.`;
-        memoryGuidance = "Use your memory of successful research strategies and information extraction techniques.";
+        memoryGuidance =
+          'Use your memory of successful research strategies and information extraction techniques.';
         break;
-        }
-        
-      case 'math':{
+      }
+
+      case 'math': {
         const { expr } = job.payload as any;
         taskDescription = `Calculate the mathematical expression: ${expr}`;
-        memoryGuidance = "Apply your memory of mathematical problem-solving approaches and verification methods.";
+        memoryGuidance =
+          'Apply your memory of mathematical problem-solving approaches and verification methods.';
         break;
-        }
-        
+      }
+
       default:
         taskDescription = `Complete the ${job.category} task: ${JSON.stringify(job.payload)}`;
-        memoryGuidance = "Use your accumulated experience to approach this task systematically.";
+        memoryGuidance = 'Use your accumulated experience to approach this task systematically.';
     }
 
     return `You are a memory-specialized AI agent. You excel at text processing, categorization, 
@@ -82,9 +86,9 @@ Focus on thorough processing rather than speed.`;
   }
 
   protected buildSpecializedReflectionPrompt(plan: AgentPlan, results: any[]): string {
-    const resultsText = results.map((r, i) => 
-      `Step ${i + 1}: ${r.success ? 'SUCCESS' : 'FAILED'} - ${r.result || r.error}`
-    ).join('\n');
+    const resultsText = results
+      .map((r, i) => `Step ${i + 1}: ${r.success ? 'SUCCESS' : 'FAILED'} - ${r.result || r.error}`)
+      .join('\n');
 
     return `You are a memory-specialized AI agent analyzing your task completion results.
 
@@ -116,7 +120,7 @@ Ensure the finalResult is the actual answer, not a description of what you did.`
       }
 
       const plan = JSON.parse(jsonMatch[0]);
-      
+
       if (!plan.goal || !plan.steps || !Array.isArray(plan.steps)) {
         throw new Error('Invalid plan structure');
       }
@@ -126,7 +130,7 @@ Ensure the finalResult is the actual answer, not a description of what you did.`
         if (!step.tool || !step.params || !step.reasoning) {
           throw new Error('Invalid step structure');
         }
-        
+
         if (!this.tools.includes(step.tool)) {
           throw new Error(`Tool ${step.tool} not available`);
         }
@@ -139,7 +143,10 @@ Ensure the finalResult is the actual answer, not a description of what you did.`
     }
   }
 
-  protected parseReflectionResponse(content: string, results: any[]): { success: boolean; finalResult: string; adjustments: string[] } {
+  protected parseReflectionResponse(
+    content: string,
+    results: any[]
+  ): { success: boolean; finalResult: string; adjustments: string[] } {
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
@@ -147,31 +154,31 @@ Ensure the finalResult is the actual answer, not a description of what you did.`
       }
 
       const reflection = JSON.parse(jsonMatch[0]);
-      
+
       return {
         success: reflection.success || false,
         finalResult: reflection.finalResult || 'Task completed',
-        adjustments: reflection.adjustments || []
+        adjustments: reflection.adjustments || [],
       };
     } catch (error) {
       console.error('[HybridMemoryAgent] Reflection parsing failed:', error);
-      
+
       // Memory agent should attempt to extract actual results
-      const hasSuccessfulSteps = results.some(r => r.success);
+      const hasSuccessfulSteps = results.some((r) => r.success);
       let finalResult = 'Task completed';
-      
+
       if (hasSuccessfulSteps) {
         // Try to extract the actual result from successful steps
-        const successfulResult = results.find(r => r.success && r.result);
+        const successfulResult = results.find((r) => r.success && r.result);
         if (successfulResult) {
           finalResult = this.extractActualResult(successfulResult.result);
         }
       }
-      
+
       return {
         success: hasSuccessfulSteps,
         finalResult,
-        adjustments: ['Improve reflection parsing', 'Better result extraction']
+        adjustments: ['Improve reflection parsing', 'Better result extraction'],
       };
     }
   }
@@ -181,29 +188,29 @@ Ensure the finalResult is the actual answer, not a description of what you did.`
     if (typeof result === 'string') {
       return result;
     }
-    
+
     if (result && result.text) {
       return result.text;
     }
-    
+
     if (result && result.label) {
       return result.label;
     }
-    
+
     if (result && result.value !== undefined) {
       return String(result.value);
     }
-    
+
     if (result && result.content) {
       return result.content.substring(0, 500); // Limit content length
     }
-    
+
     return JSON.stringify(result);
   }
 
   private createFallbackPlan(job: JobData): AgentPlan {
     switch (job.category) {
-      case 'summarize':{
+      case 'summarize': {
         const { text, maxWords } = job.payload as any;
         return {
           goal: `Summarize text in ${maxWords || 50} words`,
@@ -211,12 +218,13 @@ Ensure the finalResult is the actual answer, not a description of what you did.`
             {
               tool: 'stringKit',
               params: { text, mode: 'summarize', maxWords: maxWords || 50 },
-              reasoning: 'Apply systematic summarization using memory of effective techniques'
-            }
-          ]
+              reasoning: 'Apply systematic summarization using memory of effective techniques',
+            },
+          ],
         };
+      }
 
-      case 'classify':{
+      case 'classify': {
         const { labels, answer } = job.payload as any;
         return {
           goal: 'Classify content accurately',
@@ -224,31 +232,33 @@ Ensure the finalResult is the actual answer, not a description of what you did.`
             {
               tool: 'stringKit',
               params: { text: answer, mode: 'classify', labels },
-              reasoning: 'Use pattern recognition and memory of similar classifications'
-            }
-          ]
+              reasoning: 'Use pattern recognition and memory of similar classifications',
+            },
+          ],
         };
+      }
 
-      case 'web_research':{
+      case 'web_research': {
         const { url, question } = job.payload as any;
         return {
           goal: `Research: ${question}`,
           steps: [
             {
               tool: 'browser',
-              params: { 
-                url: url, 
+              params: {
+                url: url,
                 steps: [
                   { type: 'wait', ms: 1000 },
-                  { type: 'extract', selector: 'body' }
-                ]
+                  { type: 'extract', selector: 'body' },
+                ],
               },
-              reasoning: 'Systematic information extraction using proven methods'
-            }
-          ]
+              reasoning: 'Systematic information extraction using proven methods',
+            },
+          ],
         };
+      }
 
-      case 'math':{
+      case 'math': {
         const { expr } = job.payload as any;
         return {
           goal: `Calculate: ${expr}`,
@@ -256,15 +266,16 @@ Ensure the finalResult is the actual answer, not a description of what you did.`
             {
               tool: 'calc',
               params: { expr },
-              reasoning: 'Apply mathematical knowledge with verification'
-            }
-          ]
+              reasoning: 'Apply mathematical knowledge with verification',
+            },
+          ],
         };
+      }
 
       default:
         return {
           goal: `Complete ${job.category} task`,
-          steps: []
+          steps: [],
         };
     }
   }

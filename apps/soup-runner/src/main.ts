@@ -11,7 +11,7 @@ import path from 'path';
 const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
-import { SimpleAgent, LangGraphAgent, SpecializedAgentFactory, jobGenerator } from '@soup/agents';
+import { SimpleAgent, SpecializedAgentFactory, jobGenerator } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
 const app = Fastify();
