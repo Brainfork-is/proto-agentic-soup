@@ -69,23 +69,25 @@ export async function summarize(
   let promptTemplate: string;
 
   switch (style) {
-    case 'bullet_points':
+    case 'bullet_points':{
       promptTemplate = `Summarize the following text in ${maxWords} words or less using bullet points:
 
 Text: {text}
 
 Summary (${maxWords} words max, bullet points):`;
       break;
+      }
 
-    case 'detailed':
+    case 'detailed':{
       promptTemplate = `Provide a comprehensive summary of the following text in ${maxWords} words or less, preserving key details:
 
 Text: {text}
 
 Detailed Summary (${maxWords} words max):`;
       break;
+      }
 
-    case 'concise':
+    case 'concise':{
     default:
       promptTemplate = `Summarize the following text in ${maxWords} words or less. Be extremely concise:
 
@@ -93,6 +95,7 @@ Text: {text}
 
 Concise Summary (${maxWords} words max):`;
       break;
+      }
   }
 
   const prompt = PromptTemplate.fromTemplate(promptTemplate);

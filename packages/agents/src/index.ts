@@ -7,6 +7,27 @@ import { memoryManager } from './agentMemory';
 // Re-export for external use
 export { jobGenerator } from './jobGenerator';
 export { memoryManager } from './agentMemory';
+export { LangGraphAgent } from './langgraph';
+// export { ReActSoupAgent } from './langchain-agents/ReActSoupAgent'; // Temporarily disabled due to TypeScript issues
+
+// Export specialized agents and factory
+export { SimpleReActAgent } from './simple-react-agent/SimpleReActAgent';
+export { SimpleMemoryAgent } from './simple-memory-agent/SimpleMemoryAgent';
+export { SimpleResearchAgent } from './simple-research-agent/SimpleResearchAgent';
+export { SimpleRetrievalAgent } from './simple-retrieval-agent/SimpleRetrievalAgent';
+
+// Export hybrid agents (working tool execution)
+export { HybridReActAgent } from './hybrid-agents/HybridReActAgent';
+export { HybridMemoryAgent } from './hybrid-agents/HybridMemoryAgent';
+export { HybridResearchAgent } from './hybrid-agents/HybridResearchAgent';
+export { HybridRetrievalAgent } from './hybrid-agents/HybridRetrievalAgent';
+export { BaseSpecializedAgent } from './hybrid-agents/BaseSpecializedAgent';
+
+export {
+  SpecializedAgentFactory,
+  type AgentType,
+  type SpecializedAgent,
+} from './specialized-agent-factory/SpecializedAgentFactory';
 
 export class SimpleAgent {
   id: string;
@@ -36,7 +57,7 @@ export class SimpleAgent {
 
           // Actor: Execute tool calls based on plan
           switch (step.tool) {
-            case 'browser':
+            case 'browser': {
               if (this.tools.includes('browser')) {
                 result = await Tools.browser(step.params as { url: string; steps: any[] });
                 totalStepsUsed += result.stepsUsed || 0;
@@ -44,8 +65,9 @@ export class SimpleAgent {
                 result = { error: 'Browser tool not available' };
               }
               break;
+            }
 
-            case 'stringKit':
+            case 'stringKit': {
               if (this.tools.includes('stringKit')) {
                 result = await Tools.stringKit(
                   step.params as {
@@ -60,16 +82,18 @@ export class SimpleAgent {
                 result = { error: 'StringKit tool not available' };
               }
               break;
+            }
 
-            case 'calc':
+            case 'calc': {
               if (this.tools.includes('calc')) {
                 result = await Tools.calc(step.params as { expr: string });
               } else {
                 result = { error: 'Calc tool not available' };
               }
               break;
+            }
 
-            case 'retrieval':
+            case 'retrieval': {
               if (this.tools.includes('retrieval')) {
                 result = await Tools.retrieval(
                   step.params as {
@@ -81,6 +105,7 @@ export class SimpleAgent {
                 result = { error: 'Retrieval tool not available' };
               }
               break;
+            }
 
             default:
               result = { error: `Unknown tool: ${step.tool}` };

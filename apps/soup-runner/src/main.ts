@@ -829,21 +829,33 @@ async function seedIfEmpty() {
 
   console.log(`[seed] Creating 60 agents from ${seeds.agents.length} archetypes...`);
 
-  // Create 10 variants for each of the 6 archetypes (60 total agents)
-  for (const archetype of seeds.agents) {
-    for (let variant = 0; variant < 10; variant++) {
-      // Create mutations for each variant
-      const mutatedTemperature = mutateTemperature(archetype.temperature, variant);
-      const mutatedTools = mutateTools(archetype.tools, variant);
-      const mutatedCoopThreshold = mutateCoopThreshold(archetype.coopThreshold, variant);
+  // Create specialized agents with different archetypes for Phase 5 evolution
+  const agentArchetypes = [
+    'research-specialist',
+    'problem-solver',
+    'data-analyst',
+    'memory-expert',
+  ];
 
-      // Create blueprint for this variant
+  // Create 15 variants for each of the 4 specialized archetypes (60 total agents)
+  for (let archetypeIndex = 0; archetypeIndex < agentArchetypes.length; archetypeIndex++) {
+    const archetypeType = agentArchetypes[archetypeIndex];
+    const baseArchetype = seeds.agents[archetypeIndex % seeds.agents.length]; // Rotate through base seeds
+
+    for (let variant = 0; variant < 15; variant++) {
+      // Create mutations for each variant
+      const mutatedTemperature = mutateTemperature(baseArchetype.temperature, variant);
+      const mutatedTools = mutateTools(baseArchetype.tools, variant);
+      const mutatedCoopThreshold = mutateCoopThreshold(baseArchetype.coopThreshold, variant);
+
+      // Create blueprint for this specialized archetype variant
       const blueprint = await prisma.blueprint.create({
         data: {
           version: 1,
-          llmModel: archetype.llmModel,
+          llmModel: baseArchetype.llmModel,
           temperature: mutatedTemperature,
           tools: mutatedTools.join(','),
+          archetype: archetypeType, // Phase 5: Assign specialized archetype
           coopThreshold: mutatedCoopThreshold,
           minBalance: 30,
           mutationRate: 0.15,
@@ -865,7 +877,7 @@ async function seedIfEmpty() {
       });
 
       console.log(
-        `[seed] Created ${archetype.id}_v${variant}: temp=${mutatedTemperature.toFixed(2)}, tools=[${mutatedTools.join(',')}], coop=${mutatedCoopThreshold.toFixed(2)}`
+        `[seed] Created ${archetypeType}_v${variant}: temp=${mutatedTemperature.toFixed(2)}, tools=[${mutatedTools.join(',')}], archetype=${archetypeType}`
       );
     }
   }
@@ -1020,17 +1032,18 @@ async function startAgentWorkers() {
       async (job: any) => {
         const started = Date.now();
 
-        // Create specialized agent based on job category for natural selection
+        // Create specialized agent based on blueprint archetype (Phase 5) with job category fallback
         const agent = SpecializedAgentFactory.createAgent(
           s.id,
           bp.temperature,
           bp.tools.split(',').filter(Boolean),
           undefined, // Let factory choose best type
-          job.data.category // Pass job category for specialization
+          job.data.category, // Pass job category for specialization
+          bp.archetype // Pass blueprint archetype (Phase 5 enhancement)
         );
 
         console.log(
-          `[Worker] Agent ${s.id} (specialized for ${job.data.category}) processing job ${job.data.dbJobId}`
+          `[Worker] Agent ${s.id} (archetype: ${bp.archetype}) processing ${job.data.category} job ${job.data.dbJobId}`
         );
         const res: any = await agent.handle(job.data);
 
@@ -1118,12 +1131,20 @@ async function epochTick() {
       if (toolsSet.has(t)) toolsSet.delete(t);
       else toolsSet.add(t);
 
+      // Phase 5: Archetype mutation during reproduction
+      const archetypes = ['research-specialist', 'problem-solver', 'data-analyst', 'memory-expert'];
+      const mutatedArchetype =
+        Math.random() < 0.1 // 10% chance of archetype mutation
+          ? archetypes[Math.floor(Math.random() * archetypes.length)]
+          : bp.archetype; // Keep parent's archetype 90% of the time
+
       const child = await prisma.blueprint.create({
         data: {
           version: bp.version + 1,
           llmModel: bp.llmModel,
           temperature: newTemp,
           tools: Array.from(toolsSet).join(','),
+          archetype: mutatedArchetype, // Phase 5: Include archetype with mutation
           coopThreshold: bp.coopThreshold,
           minBalance: bp.minBalance,
           mutationRate: bp.mutationRate,

@@ -39,6 +39,7 @@ function mockClassify(text: string, labels: string[]): ClassificationResult {
     if (textLower.includes(label.toLowerCase())) {
       selectedLabel = label;
       break;
+      }
     }
   }
 

@@ -213,6 +213,13 @@ Respond with a JSON object in this exact format:
   private sanitizeJSON(jsonStr: string): string {
     // Fix common LLM JSON formatting issues
     let sanitized = jsonStr
+      // Fix nested quotes in params field - specifically for the stringKit case
+      .replace(/"params":\s*\{([^}]*)\\"([^}]*)\\"([^}]*)\}/g, '"params": {$1$2$3}')
+      // Fix the specific issue where stringKit params have escaped quotes
+      .replace(/"params":\s*\{\s*"text":\s*\\"([^"]*)\\"([^}]*)\}/g, '"params": {"text": "$1"$2}')
+      .replace(/"mode":\s*\\"([^"]*)\\"([^}]*)/g, '"mode": "$1"$2')
+      // Fix escaped quotes within string values
+      .replace(/\\"([^"]*?)\\"/g, '$1')
       // Fix single quotes around string values
       .replace(/'([^']*?)'/g, '"$1"')
       // Fix unquoted property names (but be careful with nested objects)
@@ -270,13 +277,13 @@ Respond with a JSON object in this exact format:
     // Extract JSON from response - handle markdown code blocks and other formats
     let jsonStr = '';
 
-    // Try to extract from markdown code block first
+    // Try to extract from markdown code block first (with or without json specifier)
     const codeBlockMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
     if (codeBlockMatch) {
       jsonStr = codeBlockMatch[1];
     } else {
-      // Fall back to finding the first JSON object
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      // Fall back to finding the first JSON object between braces
+      const jsonMatch = content.match(/\{[\s\S]*?\}(?=\s*$|\s*```|\s*Note:|\s*\n\n)/);
       if (!jsonMatch) {
         throw new Error('No JSON found in plan response');
       }
@@ -354,8 +361,8 @@ Respond with a JSON object in this exact format:
     if (codeBlockMatch) {
       jsonStr = codeBlockMatch[1];
     } else {
-      // Fall back to finding the first JSON object
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      // Fall back to finding the first JSON object between braces
+      const jsonMatch = content.match(/\{[\s\S]*?\}(?=\s*$|\s*```|\s*Note:|\s*\n\n)/);
       if (!jsonMatch) {
         throw new Error('No JSON found in reflection response');
       }
