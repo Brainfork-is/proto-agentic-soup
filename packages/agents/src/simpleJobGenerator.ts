@@ -36,32 +36,31 @@ export class SimpleJobGenerator {
   }
 
   async generateJob(): Promise<SimpleJob> {
-    const prompt = `Generate a diverse, actionable task that an AI agent can complete immediately. Create tasks across different domains and avoid repetition.
+    const prompt = `Generate ONE single, actionable task that an AI agent can complete immediately. You must create only ONE task, not multiple tasks or a list.
 
-VARIETY REQUIREMENTS:
-- Mix different industries: technology, healthcare, education, finance, retail, entertainment, travel, food, etc.
-- Mix task types: research, writing, analysis, planning, creative, problem-solving, etc.
-- Vary complexity and length requirements
-- Include both business and personal use cases
+VARIETY REQUIREMENTS (choose ONE domain):
+- Pick ONE industry: technology, healthcare, education, finance, retail, entertainment, travel, food, etc.
+- Pick ONE task type: research, writing, analysis, planning, creative, problem-solving, etc.
+- Create ONE specific deliverable
+- Either business OR personal use case (not both)
 
-EXAMPLES across different domains:
-Business: "Create a 5-step employee onboarding checklist for a remote software company"
-Creative: "Write 3 different taglines for a sustainable furniture brand"
-Research: "Compare the pros and cons of electric vs hybrid vehicles for city driving"
-Education: "Explain cryptocurrency basics for teenagers in simple terms"
-Health: "List 10 desk exercises for office workers with time estimates"
-Travel: "Plan a 3-day weekend itinerary for first-time visitors to Tokyo"
-Technology: "Write installation instructions for setting up a home WiFi router"
-Finance: "Create a monthly budget template for college students"
+SINGLE TASK EXAMPLES (pick a style similar to ONE of these):
+"Create a 5-step employee onboarding checklist for a remote software company"
+"Write 3 different taglines for a sustainable furniture brand"  
+"Compare the pros and cons of electric vs hybrid vehicles for city driving"
+"Explain cryptocurrency basics for teenagers in simple terms"
+"Plan a 3-day weekend itinerary for first-time visitors to Tokyo"
+"Write installation instructions for setting up a home WiFi router"
+"Create a monthly budget template for college students"
 
-REQUIREMENTS:
+CRITICAL REQUIREMENTS:
+- Generate EXACTLY ONE task only
+- No lists, no multiple items, no "and also do this"
 - Completely self-contained (no placeholders or external references)
-- Specific deliverable requested
+- Specific single deliverable requested
 - Achievable by AI with current tools
-- Clear scope and requirements
-- Avoid repeating similar topics or formats
 
-IMPORTANT: Respond with only the task prompt - no explanations or additional text.`;
+IMPORTANT: Respond with only ONE complete task prompt - no explanations, no lists, no additional text.`;
 
     try {
       console.log('[SimpleJobGenerator] Requesting job from LLM...');
