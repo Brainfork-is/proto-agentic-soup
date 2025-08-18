@@ -119,34 +119,39 @@ export class AgentMemory {
     }
 
     const stats = this.getStats();
-    const recentFailures = this.recallFailures(3);
-    const recentSuccesses = this.recallSuccesses(3);
 
-    let context = `Previous Performance:
-- Success Rate: ${(stats.successRate * 100).toFixed(1)}%
-- Average Steps: ${stats.averageSteps.toFixed(1)}
-- Total Jobs: ${stats.totalJobs}
+    // Keep context concise to reduce token usage
+    let context = `Experience: ${(stats.successRate * 100).toFixed(0)}% success, ${stats.totalJobs} jobs, avg ${stats.averageSteps.toFixed(1)} steps`;
 
-Category Performance:`;
-
-    for (const [category, catStats] of Object.entries(stats.categoryStats)) {
-      const successRate =
-        catStats.attempts > 0 ? ((catStats.successes / catStats.attempts) * 100).toFixed(1) : '0';
-      context += `\n- ${category}: ${successRate}% success (${catStats.attempts} attempts, avg ${catStats.avgSteps.toFixed(1)} steps)`;
+    // Only show category stats if we have diverse experience
+    const categories = Object.keys(stats.categoryStats);
+    if (categories.length > 1) {
+      context += '\nCategories: ';
+      context += categories
+        .map((cat) => {
+          const catStats = stats.categoryStats[cat];
+          const successRate =
+            catStats.attempts > 0
+              ? ((catStats.successes / catStats.attempts) * 100).toFixed(0)
+              : '0';
+          return `${cat}:${successRate}%`;
+        })
+        .join(', ');
     }
 
-    if (recentFailures.length > 0) {
-      context += `\n\nRecent Failures:`;
-      for (const failure of recentFailures) {
-        context += `\n- ${failure.category}: ${failure.adjustments?.join(', ') || 'Unknown issue'}`;
-      }
-    }
+    // Only include recent lessons if we have failures with adjustments
+    const recentFailures = this.recallFailures(2);
+    const relevantLessons = recentFailures
+      .filter((f) => f.adjustments && f.adjustments.length > 0)
+      .slice(0, 2);
 
-    if (recentSuccesses.length > 0) {
-      context += `\n\nRecent Successes:`;
-      for (const success of recentSuccesses) {
-        context += `\n- ${success.category}: Used ${success.stepsUsed} steps`;
-      }
+    if (relevantLessons.length > 0) {
+      context +=
+        '\nLessons: ' +
+        relevantLessons
+          .map((f) => f.adjustments?.[0] || '')
+          .filter(Boolean)
+          .join(', ');
     }
 
     return context;

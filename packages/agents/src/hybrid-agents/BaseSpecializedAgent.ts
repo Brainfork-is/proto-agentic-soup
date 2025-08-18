@@ -304,6 +304,27 @@ export abstract class BaseSpecializedAgent {
 
   // Abstract methods that each specialized agent must implement
   protected abstract buildSpecializedPlanningPrompt(job: JobData, memoryContext: string): string;
+
+  /**
+   * Create optimized prompts to reduce token usage while maintaining effectiveness
+   */
+  protected buildOptimizedPrompt(
+    role: string,
+    taskDescription: string,
+    memoryContext: string,
+    availableTools: string
+  ): string {
+    // Keep prompts concise to reduce token usage
+    return `${role} agent. ${taskDescription}
+
+Tools: ${availableTools}
+Experience: ${memoryContext}
+
+JSON plan format:
+{"goal": "brief goal", "steps": [{"tool": "name", "params": {}, "reasoning": "why"}]}
+
+Use only available tools.`;
+  }
   protected abstract buildSpecializedReflectionPrompt(plan: AgentPlan, results: any[]): string;
   protected abstract parsePlanResponse(content: string, job: JobData): AgentPlan;
   protected abstract parseReflectionResponse(
