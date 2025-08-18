@@ -36,9 +36,27 @@ export class SimpleJobGenerator {
   }
 
   async generateJob(): Promise<SimpleJob> {
-    const prompt = `Please respond with a job that you would expect an AI agent to be able to complete, the response should be in the format of a Prompt that you think a user might ask an agent to perform. Base your prompts on considering the general public as well as business users might create, I'm going to ask you this again in the future so it's important that you create something fairly randomized and don't keep responding with the same job, however you MUST ONLY respond with one job.
+    const prompt = `Please respond with a complete, actionable job that an AI agent can perform immediately. The job should be specific and contain all necessary information - no placeholders, no "[insert X here]", no references to external documents or transcripts.
 
-IMPORTANT: Only respond with the job prompt itself, no additional text or explanation.`;
+Examples of GOOD jobs:
+- "Write a 300-word blog post about the benefits of remote work for small businesses"
+- "Create a social media marketing plan for a coffee shop, including 5 post ideas and posting schedule"
+- "Research and compare the features of Tesla Model 3 vs Toyota Prius"
+- "Draft a professional email to customers announcing a 20% off sale this weekend"
+
+Examples of BAD jobs (avoid these):
+- "Summarize this research paper [insert link]"
+- "Analyze the transcript [insert transcript here]" 
+- "Review the document attached"
+
+Requirements:
+- Job must be completely self-contained
+- No external references or placeholders
+- Specific and actionable
+- Suitable for general public or business users
+- Can be completed by an AI agent with available tools
+
+IMPORTANT: Only respond with the complete job prompt itself, no additional text or explanation.`;
 
     try {
       console.log('[SimpleJobGenerator] Requesting job from LLM...');

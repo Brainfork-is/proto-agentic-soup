@@ -573,6 +573,23 @@ app.get('/api/agents', async () => {
 
   return agents.map((agent: any) => {
     const blueprint: any = blueprintMap.get(agent.blueprintId);
+
+    // Map archetypes to their actual tools for display
+    const getToolsForArchetype = (archetype: string): string => {
+      switch (archetype) {
+        case 'research-specialist':
+          return 'wikipedia';
+        case 'problem-solver':
+          return 'llm-only';
+        case 'data-analyst':
+          return 'web-browser';
+        case 'memory-expert':
+          return 'google-trends';
+        default:
+          return 'llm-only';
+      }
+    };
+
     return {
       id: agent.id,
       alive: agent.alive,
@@ -582,7 +599,7 @@ app.get('/api/agents', async () => {
       reputation: agent.reputation,
       meanTtcSec: agent.meanTtcSec,
       temperature: blueprint?.temperature || 0,
-      tools: blueprint?.tools || '',
+      tools: getToolsForArchetype(blueprint?.archetype || 'problem-solver'),
       llmModel: blueprint?.llmModel || 'unknown',
     };
   });
@@ -657,10 +674,26 @@ app.get('/api/jobs', async () => {
                         where: { id: agent.blueprintId },
                       });
                       if (blueprint) {
+                        // Map archetypes to their actual tools for display
+                        const getToolsForArchetype = (archetype: string): string[] => {
+                          switch (archetype) {
+                            case 'research-specialist':
+                              return ['wikipedia'];
+                            case 'problem-solver':
+                              return ['llm-only'];
+                            case 'data-analyst':
+                              return ['web-browser'];
+                            case 'memory-expert':
+                              return ['google-trends'];
+                            default:
+                              return ['llm-only'];
+                          }
+                        };
+
                         agentInfo = {
                           id: agent.id.substring(0, 8) + '...',
                           temperature: blueprint.temperature,
-                          tools: blueprint.tools.split(',').filter(Boolean),
+                          tools: getToolsForArchetype(blueprint.archetype || 'problem-solver'),
                           llmModel: blueprint.llmModel,
                           balance: agent.balance,
                           successRate:
