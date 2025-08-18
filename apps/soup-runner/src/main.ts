@@ -574,20 +574,15 @@ app.get('/api/agents', async () => {
   return agents.map((agent: any) => {
     const blueprint: any = blueprintMap.get(agent.blueprintId);
 
-    // Map archetypes to their actual tools for display
+    // Map database archetypes to actual agent tool names for display
     const getToolsForArchetype = (archetype: string): string => {
-      switch (archetype) {
-        case 'research-specialist':
-          return 'wikipedia';
-        case 'problem-solver':
-          return 'llm-only';
-        case 'data-analyst':
-          return 'web-browser';
-        case 'memory-expert':
-          return 'google-trends';
-        default:
-          return 'llm-only';
-      }
+      const archetypeMap: Record<string, string> = {
+        'research-specialist': 'wikipedia',
+        'problem-solver': 'llm-only',
+        'data-analyst': 'web-browser',
+        'memory-expert': 'google-trends',
+      };
+      return archetypeMap[archetype] || 'llm-only';
     };
 
     return {
@@ -674,20 +669,15 @@ app.get('/api/jobs', async () => {
                         where: { id: agent.blueprintId },
                       });
                       if (blueprint) {
-                        // Map archetypes to their actual tools for display
+                        // Map database archetypes to actual agent tool names for display
                         const getToolsForArchetype = (archetype: string): string[] => {
-                          switch (archetype) {
-                            case 'research-specialist':
-                              return ['wikipedia'];
-                            case 'problem-solver':
-                              return ['llm-only'];
-                            case 'data-analyst':
-                              return ['web-browser'];
-                            case 'memory-expert':
-                              return ['google-trends'];
-                            default:
-                              return ['llm-only'];
-                          }
+                          const archetypeMap: Record<string, string[]> = {
+                            'research-specialist': ['wikipedia'],
+                            'problem-solver': ['llm-only'],
+                            'data-analyst': ['web-browser'],
+                            'memory-expert': ['google-trends'],
+                          };
+                          return archetypeMap[archetype] || ['llm-only'];
                         };
 
                         agentInfo = {
