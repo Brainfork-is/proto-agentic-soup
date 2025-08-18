@@ -30,7 +30,7 @@ export class SimpleJobGenerator {
     this.llm = new ChatVertexAI({
       model: process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash',
       temperature: 0.9, // High temperature for variety
-      maxOutputTokens: 200,
+      maxOutputTokens: 2000, // Increased for JSON batch generation
       authOptions: {
         credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
           ? undefined
@@ -80,14 +80,14 @@ REQUIREMENTS FOR EACH TASK:
 - Achievable by AI with current tools
 - Clear scope and requirements
 
-CRITICAL: Respond with ONLY valid JSON in this exact format:
+CRITICAL: Respond with ONLY valid JSON in this exact format (ensure all strings are properly quoted):
 {
   "jobs": [
     {"prompt": "task description here", "payout": 7, "deadlineS": 60},
-    {"prompt": "another task description", "payout": 6, "deadlineS": 60},
-    ...exactly 10 jobs total
+    {"prompt": "another task description", "payout": 6, "deadlineS": 60}
   ]
 }
+Generate exactly 10 jobs in the array.
 
 Payouts should be random between 5-10. 
 
@@ -109,10 +109,7 @@ IMPORTANT:
         .replace(/```\s*$/, '')
         .trim();
 
-      console.log(
-        '[SimpleJobGenerator] Cleaned JSON response preview:',
-        jsonResponse.substring(0, 200) + '...'
-      );
+      console.log('[SimpleJobGenerator] JSON response length:', jsonResponse.length, 'characters');
 
       // Parse JSON response
       const jobBatch: JobBatch = JSON.parse(jsonResponse);
