@@ -1,18 +1,18 @@
 /**
- * Agents package exports - Pure LangGraph implementation
+ * Agents package exports - Simplified React Agent implementation
  */
 
-// Core utilities
-export { jobGenerator } from './jobGenerator';
+// Simple React agents
+export { SimpleReactAgent, createAgentForBlueprint } from './SimpleReactAgent';
+export type { AgentArchetype } from './SimpleReactAgent';
+
+// Simple job generation
+export { simpleJobGenerator } from './simpleJobGenerator';
+export type { SimpleJob } from './simpleJobGenerator';
+
+// Core utilities (kept for compatibility)
 export { memoryManager } from './agentMemory';
 
-// LangGraph agents and utilities
+// Legacy exports (deprecated)
+export { jobGenerator } from './jobGenerator';
 export { LangGraphAgent } from './langgraph/LangGraphAgent';
-export {
-  AgentState,
-  type AgentStateType,
-  type JobMemory,
-  type ToolResult,
-  type AgentPlan,
-} from './langgraph/agentState';
-export { allTools, toolMap } from './langgraph/tools';
