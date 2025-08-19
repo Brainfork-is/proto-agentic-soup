@@ -3,3 +3,4 @@ export * from './metrics';
 export * from './util';
 export * from './seed';
 export * from './config';
+export * from './logger';

@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { join } from 'path';
-import { loadSiteConfig } from '@soup/common';
+import { loadSiteConfig, log } from '@soup/common';
 
 const app = Fastify();
 
@@ -14,4 +14,4 @@ app.get('/healthz', async () => ({ ok: true }));
 
 const cfg = loadSiteConfig();
 const port = cfg.SITE_KB_PORT;
-app.listen({ port, host: '0.0.0.0' }).then(() => console.log(`[site-kb] ${port}`));
+app.listen({ port, host: '0.0.0.0' }).then(() => log(`[site-kb] ${port}`));
