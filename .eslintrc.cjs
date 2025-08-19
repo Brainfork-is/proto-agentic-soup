@@ -15,5 +15,5 @@ module.exports = {
     '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     'no-console': 'off',
   },
-  ignorePatterns: ['**/dist/**', '**/node_modules/**', '**/*.d.ts', 'apps/**/public/**', 'runs/**'],
+  ignorePatterns: ['**/dist/**', '**/node_modules/**', '**/*.d.ts', 'apps/**/public/**', 'runs/**', 'packages/agents/src/test-*.ts'],
 };

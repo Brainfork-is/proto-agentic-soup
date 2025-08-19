@@ -6,5 +6,6 @@
     "composite": true
   },
   "include": ["src"],
+  "exclude": ["src/test-generated-tool.ts", "src/test-tool-builder.ts"],
   "references": [{ "path": "../common" }]
 }

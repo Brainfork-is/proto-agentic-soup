@@ -9,7 +9,6 @@ import { DynamicTool } from '@langchain/core/tools';
 import { JobData, log, logError } from '@soup/common';
 import { CodeGeneratorTool } from './tools/codeGenerator';
 import { dynamicToolLoader } from './tools/dynamicToolLoader';
-import { z } from 'zod';
 
 // Create Vertex AI LLM instance
 function createVertexAILLM() {
@@ -176,18 +175,10 @@ Always provide actionable, complete responses using the best available tools.`;
    * Create agent-specific code generator tool with bound agent ID
    */
   private createAgentSpecificCodeGenerator(): DynamicTool {
-    const codeGeneratorSchema = z.object({
-      taskDescription: z.string().describe('Description of the task requiring a custom tool'),
-      toolName: z.string().describe('Name for the generated tool'),
-      expectedInputs: z.record(z.string()).describe('Expected input parameters and their types'),
-      expectedOutput: z.string().describe('Description of expected output format'),
-    });
-
     return new DynamicTool({
       name: 'code_generator',
       description:
         'Generate custom JavaScript tools for specific tasks when existing tools are insufficient. Call with JSON object containing: taskDescription (string), toolName (string), expectedInputs (object mapping param names to type descriptions), expectedOutput (string description).',
-      schema: codeGeneratorSchema,
       func: async (input: any): Promise<string> => {
         try {
           log(`[AgentSpecificCodeGenerator] Agent ${this.id} calling code generator`);
@@ -297,7 +288,7 @@ Always provide actionable, complete responses using the best available tools.`;
                 }
               } catch (parseError) {
                 log(
-                  `[ToolBuilderAgent] Agent ${this.id} called code_generator but couldn't parse result: ${parseError.message}`
+                  `[ToolBuilderAgent] Agent ${this.id} called code_generator but couldn't parse result: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`
                 );
               }
               break;
