@@ -10,6 +10,10 @@ export type { AgentArchetype } from './SimpleReactAgent';
 export { simpleJobGenerator } from './simpleJobGenerator';
 export type { SimpleJob } from './simpleJobGenerator';
 
+// LLM-based grading
+export { llmGrader, LLMGrader } from './llmGrader';
+export type { GradeResult } from './llmGrader';
+
 // Core utilities (kept for compatibility)
 export { memoryManager } from './agentMemory';
 

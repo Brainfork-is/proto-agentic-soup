@@ -3,7 +3,7 @@ import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 // Prisma is imported dynamically to avoid requiring a generated client in bootstrap mode
 // import { PrismaClient } from '@prisma/client';
-import { gini, topKShare, loadRunnerConfig } from '@soup/common';
+import { gini, topKShare, loadRunnerConfig, log, logError } from '@soup/common';
 import fs from 'fs-extra';
 import path from 'path';
 
@@ -11,7 +11,7 @@ import path from 'path';
 const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
-import { createAgentForBlueprint, simpleJobGenerator } from '@soup/agents';
+import { createAgentForBlueprint, simpleJobGenerator, llmGrader } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
 const app = Fastify();
@@ -81,6 +81,11 @@ app.get('/dashboard', async (request, reply) => {
         .job-status.pending { background: #fef5e7; color: #c53030; }
         .job-status.attempted { background: #ebf8ff; color: #3182ce; }
         .job-status.completed { background: #f0fff4; color: #38a169; }
+        .quality-grade { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-left: 0.5rem; }
+        .quality-grade.excellent { background: #f0fff4; color: #38a169; } /* 90-100 */
+        .quality-grade.good { background: #f7fafc; color: #4a5568; } /* 70-89 */
+        .quality-grade.fair { background: #fef5e7; color: #d69e2e; } /* 50-69 */
+        .quality-grade.poor { background: #fed7d7; color: #c53030; } /* <50 */
         .job-category { font-weight: bold; color: #2d3748; }
         .job-details { font-size: 0.8rem; color: #4a5568; margin-top: 0.25rem; }
         .job-description { 
@@ -414,9 +419,23 @@ app.get('/dashboard', async (request, reply) => {
                     '</div>';
                 }
                 
+                // Format quality grade (only for successful jobs)
+                let qualityGradeHtml = '';
+                if (job.qualityGrade !== null && job.qualityGrade !== undefined && job.status === 'completed') {
+                    const grade = job.qualityGrade;
+                    let gradeClass = 'poor';
+                    if (grade >= 80) gradeClass = 'excellent';
+                    else if (grade >= 60) gradeClass = 'good';
+                    else if (grade >= 40) gradeClass = 'fair';
+                    // 1-39 stays as 'poor' - very low quality but still passing
+                    
+                    qualityGradeHtml = '<span class="quality-grade ' + gradeClass + '">Quality: ' + grade + '/100</span>';
+                }
+
                 return '<div class="job-item">' +
                     '<div class="job-category">' + job.category + '</div>' +
                     '<span class="job-status ' + job.status + '">' + job.status.toUpperCase() + '</span>' +
+                    qualityGradeHtml +
                     '<div class="job-details">' +
                         'ID: ' + job.id + ' | Payout: ' + job.payout + ' | Age: ' + job.ageMinutes + 'min<br>' +
                         'Deadline: ' + job.deadlineS + 's | Created: ' + new Date(job.createdAt).toLocaleTimeString() +
@@ -709,6 +728,19 @@ app.get('/api/jobs', async () => {
         // or never processed. We'll leave it as pending for now.
       }
 
+      // Get quality grade from ledger entry (only for successful jobs)
+      let qualityGrade = null;
+      if (status === 'completed') {
+        const ledgerEntry = await prisma.ledger.findFirst({
+          where: {
+            jobId: job.id,
+            reason: 'payout',
+          },
+          orderBy: { ts: 'asc' },
+        });
+        qualityGrade = ledgerEntry?.qualityGrade || null;
+      }
+
       return {
         id: job.id, // Show full ID for debugging
         category: job.category,
@@ -720,6 +752,7 @@ app.get('/api/jobs', async () => {
         payload: JSON.parse(job.payload),
         result: result,
         agent: agentInfo,
+        qualityGrade: qualityGrade,
       };
     })
   );
@@ -812,10 +845,10 @@ app.get('/api/activity', async () => {
 let jobQueue: any;
 
 async function seedIfEmpty() {
-  console.log('[seed] Checking if database needs seeding...');
+  log('[seed] Checking if database needs seeding...');
   try {
     const agents = await prisma.agentState.findMany();
-    console.log(`[seed] Found ${agents.length} existing agents`);
+    log(`[seed] Found ${agents.length} existing agents`);
     if (agents.length > 0) return;
   } catch (error) {
     console.error('[seed] Database query failed:', error);
@@ -826,7 +859,7 @@ async function seedIfEmpty() {
     fs.readFileSync(path.join(__dirname, '../../../seeds', 'archetypes.json'), 'utf8')
   );
 
-  console.log(`[seed] Creating 60 agents from ${seeds.agents.length} archetypes...`);
+  log(`[seed] Creating 60 agents from ${seeds.agents.length} archetypes...`);
 
   // Create agents with tool-based archetypes (matching SimpleReactAgent types)
   const agentArchetypes = ['wikipedia', 'llm-only', 'web-browser', 'google-trends'];
@@ -870,13 +903,13 @@ async function seedIfEmpty() {
         },
       });
 
-      console.log(
+      log(
         `[seed] Created ${archetypeType}_v${variant}: temp=${mutatedTemperature.toFixed(2)}, tools=[${mutatedTools.join(',')}], archetype=${archetypeType}`
       );
     }
   }
 
-  console.log('[seed] Seeding complete: 60 agents created');
+  log('[seed] Seeding complete: 60 agents created');
 }
 
 // Mutation functions for creating variants
@@ -956,7 +989,7 @@ async function generateJobs() {
         deadlineS: job.deadlineS,
       } as any);
 
-      console.log(`[jobs] ✅ Generated general job: ${job.prompt.substring(0, 100)}...`);
+      log(`[jobs] ✅ Generated general job: ${job.prompt.substring(0, 100)}...`);
       successCount++;
     } catch (error) {
       console.error('[jobs] ❌ Failed to generate job:', (error as Error).message);
@@ -969,52 +1002,26 @@ async function generateJobs() {
   }
 
   // Log summary
-  console.log(
+  log(
     `[jobs] Generation summary: ${successCount}/${JOBS_PER_MIN} successful, ${failureCount} failed`
   );
   if (failureCount > 0) {
-    console.log('[jobs] Failure reasons:', failureReasons);
+    log('[jobs] Failure reasons:', failureReasons);
   }
 }
 
-function grade(cat: string, p: any, artifact: string) {
-  // Simplified grading for general jobs
-  if (!artifact || artifact === '') return false;
-
-  // For the simplified system, just check if agent provided a reasonable response
-  const response = artifact.trim();
-
-  // Basic quality checks:
-  // 1. Must have some content
-  // 2. Should be longer than a trivial response
-  // 3. Should not be an obvious error message
-  if (response.length < 10) return false;
-
-  // Reject obvious error responses
-  const errorPhrases = [
-    'error',
-    'failed',
-    'cannot',
-    'unable',
-    'sorry',
-    "don't know",
-    'not sure',
-    'no information',
-  ];
-
-  const lowerResponse = response.toLowerCase();
-  const hasErrorPhrase = errorPhrases.some((phrase) => lowerResponse.includes(phrase));
-
-  // Accept if it's a substantial response without obvious error indicators
-  return response.length >= 20 && !hasErrorPhrase;
+async function gradeWithLLM(jobPrompt: string, artifact: string) {
+  // Use the new LLM-based grader - no fallback, let failures fail
+  const gradeResult = await llmGrader.gradeResponse(jobPrompt, artifact);
+  return gradeResult;
 }
 
 const agentWorkers: any[] = [];
 async function startAgentWorkers() {
-  console.log('[workers] Starting agent workers...');
+  log('[workers] Starting agent workers...');
   const agents = await prisma.agentState.findMany({ where: { alive: true } });
   const bps = await prisma.blueprint.findMany();
-  console.log(`[workers] Found ${agents.length} alive agents and ${bps.length} blueprints`);
+  log(`[workers] Found ${agents.length} alive agents and ${bps.length} blueprints`);
 
   for (const s of agents) {
     const bp = bps.find((b: any) => b.id === s.blueprintId)!;
@@ -1026,11 +1033,11 @@ async function startAgentWorkers() {
 
         // Create simple React agent with archetype-based tools
         const agent = createAgentForBlueprint(s.id, bp.archetype || 'llm-only');
-        console.log(
+        log(
           `[Worker] Using SimpleReactAgent with archetype ${bp.archetype || 'llm-only'} for agent ${s.id}`
         );
 
-        console.log(
+        log(
           `[Worker] Agent ${s.id} (archetype: ${bp.archetype || 'llm-only'}) processing general job ${job.data.dbJobId}`
         );
         const res: any = await agent.handle(job.data);
@@ -1055,12 +1062,26 @@ async function startAgentWorkers() {
         const agentSucceeded = res.ok;
 
         // Only grade the artifact if the agent actually succeeded
-        const gradeResult = agentSucceeded
-          ? grade(job.data.category, job.data.payload, res.artifact)
-          : false;
+        let gradeResult: { passed: boolean; qualityScore?: number } = { passed: false };
+        let gradingFailed = false;
 
-        // The job is successful only if both agent execution AND grading succeed
-        const jobSucceeded = agentSucceeded && gradeResult;
+        if (agentSucceeded) {
+          try {
+            // Extract job prompt for grading context
+            const jobPrompt =
+              typeof job.data.payload === 'string'
+                ? job.data.payload
+                : job.data.payload.prompt || JSON.stringify(job.data.payload);
+
+            gradeResult = await gradeWithLLM(jobPrompt, res.artifact);
+          } catch (error) {
+            logError(`[workers] Grading failed for job ${job.data.dbJobId}:`, error);
+            gradingFailed = true;
+          }
+        }
+
+        // The job is successful only if agent execution succeeded, grading succeeded, and grade passed
+        const jobSucceeded = agentSucceeded && !gradingFailed && gradeResult.passed;
 
         const delta = jobSucceeded ? job.data.payout : -FAIL_PENALTY;
         await prisma.ledger.create({
@@ -1069,6 +1090,7 @@ async function startAgentWorkers() {
             jobId: job.data.dbJobId,
             delta,
             reason: jobSucceeded ? 'payout' : 'fail',
+            qualityGrade: gradeResult.qualityScore || null, // Store score even for failures
           },
         });
 
@@ -1204,7 +1226,7 @@ async function main() {
   if (BOOTSTRAP) {
     // Minimal server only; skip external services for M-1 dev
     await app.listen({ port: cfg.SOUP_RUNNER_PORT, host: '0.0.0.0' });
-    console.log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT} (bootstrap)`);
+    log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT} (bootstrap)`);
     return;
   }
   // Initialize Redis and Prisma only in full mode
@@ -1221,10 +1243,10 @@ async function main() {
 
   // Start HTTP server first so dashboard is immediately available
   await app.listen({ port: cfg.SOUP_RUNNER_PORT, host: '0.0.0.0' });
-  console.log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT}`);
+  log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT}`);
 
   // Then start background processes (job generation, agents, etc.)
-  console.log('[soup-runner] Starting background processes...');
+  log('[soup-runner] Starting background processes...');
   setInterval(generateJobs, 60_000);
   generateJobs().catch(console.error); // Don't await, run in background
   await startAgentWorkers();

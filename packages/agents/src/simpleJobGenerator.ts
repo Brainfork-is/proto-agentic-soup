@@ -4,6 +4,7 @@
  */
 
 import { ChatVertexAI } from '@langchain/google-vertexai';
+import { log, logError } from '@soup/common';
 
 export interface SimpleJob {
   prompt: string;
@@ -53,32 +54,67 @@ export class SimpleJobGenerator {
   }
 
   private async generateJobBatch(): Promise<void> {
-    const prompt = `Generate exactly 10 diverse, actionable tasks that AI agents can complete immediately. Return them in JSON format.
+    // 20% chance to encourage tool usage
+    const shouldEncourageTools = Math.random() <= 0.2;
+    const toolsInstruction = shouldEncourageTools
+      ? `\n\nTOOL USAGE ENCOURAGEMENT: For approximately half of these tasks, add a request to ground the information with sources. Use phrases like:
+- "Please cite specific sources or studies"
+- "Include recent examples from web research" 
+- "Reference current data or statistics"
+- "Look up current information on this topic"
+- "Provide sources to support your recommendations"
+- "Research recent developments in [topic]"
+This will encourage agents to use their web search, Wikipedia, and research tools instead of relying only on prior knowledge.`
+      : '';
+
+    const prompt = `Generate exactly 10 diverse, actionable tasks that AI agents can complete immediately. Return them in JSON format.${toolsInstruction}
 
 VARIETY REQUIREMENTS:
-- Mix different industries: technology, healthcare, education, finance, retail, entertainment, travel, food, etc.
-- Mix task types: research, writing, analysis, planning, creative, problem-solving, etc.
-- Vary complexity and length requirements
+- Mix different industries: technology, healthcare, education, finance, retail, entertainment, travel, food, manufacturing, real estate, sports, arts, etc.
+- Mix task types: research, writing, analysis, planning, creative, problem-solving, comparison, explanation, instruction, design, etc.
+- Vary complexity and length requirements (from simple lists to detailed guides)
 - Include both business and personal use cases
-- Ensure each task is completely different from the others
+- Generate completely unique tasks - NO repetition of previous patterns
 
-TASK EXAMPLES (create 10 tasks with similar variety):
-"Create a 5-step employee onboarding checklist for a remote software company"
-"Write 3 different taglines for a sustainable furniture brand"  
-"Compare the pros and cons of electric vs hybrid vehicles for city driving"
-"Explain cryptocurrency basics for teenagers in simple terms"
-"Plan a 3-day weekend itinerary for first-time visitors to Tokyo"
-"Write installation instructions for setting up a home WiFi router"
-"Create a monthly budget template for college students"
-"List 8 time management techniques for busy entrepreneurs"
-"Design a morning routine for better productivity"
-"Explain the benefits of meditation for stress relief"
+TASK CATEGORIES TO EXPLORE (create diverse tasks across these domains):
+- Business Strategy: planning, analysis, process improvement
+- Content Creation: writing, design, marketing materials  
+- Education: explanations, tutorials, learning guides
+- Technology: comparisons, setup guides, troubleshooting
+- Health & Wellness: routines, advice, explanations
+- Finance: budgeting, analysis, recommendations
+- Travel & Lifestyle: planning, recommendations, comparisons
+- Creative Projects: brainstorming, design, ideation
+- Problem Solving: troubleshooting, optimization, solutions
+- Research & Analysis: investigation, comparison, evaluation
+
+SPECIFICITY REQUIREMENTS:
+- Use actual, real-world named entities and brands that exist
+- Include concrete dates, timeframes, and specific numbers
+- Reference specific products, services, or organizations by their actual names
+- When asking for analysis, specify exact metrics and criteria to evaluate
+- Make all references searchable and verifiable through web search
+
+FORBIDDEN PATTERNS - Never use vague references:
+- NO: "a popular..." / "a new..." / "a recent..." / "a leading..." / "a major..."
+- NO: "a company" / "a product" / "a service" / "an organization" 
+- NO: "recently" / "lately" / "in recent months" / "current"
+- NO: "provided data" / "given dataset" / "attached information"
+- INSTEAD: Use specific names, exact dates, and include all needed data inline
+
+DATA COMPLETENESS RULES:
+- Every task must be fully self-contained with ALL necessary information
+- If the task involves analyzing data, generate and include the actual data points in the prompt
+- Never reference external, attached, or provided materials that don't exist
+- Include all numbers, statistics, or data points needed within the task description
+- Format any data clearly within the prompt itself (e.g., "Analyze these Q3 2024 sales figures: Product A: $45K, Product B: $72K...")
 
 REQUIREMENTS FOR EACH TASK:
 - Completely self-contained (no placeholders or external references)
 - Specific deliverable requested
 - Achievable by AI with current tools
 - Clear scope and requirements
+- Use real entity names, not generic descriptions
 
 CRITICAL: Respond with ONLY valid JSON in this exact format (ensure all strings are properly quoted):
 {
@@ -98,7 +134,7 @@ IMPORTANT:
 - Start with { and end with }`;
 
     try {
-      console.log('[SimpleJobGenerator] Requesting job batch from LLM...');
+      log('[SimpleJobGenerator] Requesting job batch from LLM...');
 
       const response = await this.llm.invoke(prompt);
       let jsonResponse = response.content as string;
@@ -109,7 +145,7 @@ IMPORTANT:
         .replace(/```\s*$/, '')
         .trim();
 
-      console.log('[SimpleJobGenerator] JSON response length:', jsonResponse.length, 'characters');
+      log('[SimpleJobGenerator] JSON response length:', jsonResponse.length, 'characters');
 
       // Parse JSON response
       const jobBatch: JobBatch = JSON.parse(jsonResponse);
@@ -121,9 +157,9 @@ IMPORTANT:
       // Add jobs to queue
       this.jobQueue.push(...jobBatch.jobs);
 
-      console.log(`[SimpleJobGenerator] Generated ${jobBatch.jobs.length} jobs in batch`);
+      log(`[SimpleJobGenerator] Generated ${jobBatch.jobs.length} jobs in batch`);
     } catch (error) {
-      console.error('[SimpleJobGenerator] Failed to generate job batch:', error);
+      logError('[SimpleJobGenerator] Failed to generate job batch:', error);
       throw error;
     }
   }
