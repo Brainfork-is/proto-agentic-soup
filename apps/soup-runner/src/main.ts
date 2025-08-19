@@ -11,7 +11,7 @@ import path from 'path';
 const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
-import { LangGraphAgent, jobGenerator } from '@soup/agents';
+import { createAgentForBlueprint, simpleJobGenerator } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
 const app = Fastify();
@@ -573,6 +573,13 @@ app.get('/api/agents', async () => {
 
   return agents.map((agent: any) => {
     const blueprint: any = blueprintMap.get(agent.blueprintId);
+
+    // Validate archetype or default to llm-only
+    const getToolsForArchetype = (archetype: string): string => {
+      const validTools = ['wikipedia', 'llm-only', 'web-browser', 'google-trends'];
+      return validTools.includes(archetype) ? archetype : 'llm-only';
+    };
+
     return {
       id: agent.id,
       alive: agent.alive,
@@ -582,7 +589,7 @@ app.get('/api/agents', async () => {
       reputation: agent.reputation,
       meanTtcSec: agent.meanTtcSec,
       temperature: blueprint?.temperature || 0,
-      tools: blueprint?.tools || '',
+      tools: getToolsForArchetype(blueprint?.archetype || 'llm-only'),
       llmModel: blueprint?.llmModel || 'unknown',
     };
   });
@@ -657,10 +664,21 @@ app.get('/api/jobs', async () => {
                         where: { id: agent.blueprintId },
                       });
                       if (blueprint) {
+                        // Validate archetype or default to llm-only
+                        const getToolsForArchetype = (archetype: string): string[] => {
+                          const validTools = [
+                            'wikipedia',
+                            'llm-only',
+                            'web-browser',
+                            'google-trends',
+                          ];
+                          return validTools.includes(archetype) ? [archetype] : ['llm-only'];
+                        };
+
                         agentInfo = {
                           id: agent.id.substring(0, 8) + '...',
                           temperature: blueprint.temperature,
-                          tools: blueprint.tools.split(',').filter(Boolean),
+                          tools: getToolsForArchetype(blueprint.archetype || 'llm-only'),
                           llmModel: blueprint.llmModel,
                           balance: agent.balance,
                           successRate:
@@ -810,13 +828,8 @@ async function seedIfEmpty() {
 
   console.log(`[seed] Creating 60 agents from ${seeds.agents.length} archetypes...`);
 
-  // Create specialized agents with different archetypes for Phase 5 evolution
-  const agentArchetypes = [
-    'research-specialist',
-    'problem-solver',
-    'data-analyst',
-    'memory-expert',
-  ];
+  // Create agents with tool-based archetypes (matching SimpleReactAgent types)
+  const agentArchetypes = ['wikipedia', 'llm-only', 'web-browser', 'google-trends'];
 
   // Create 15 variants for each of the 4 specialized archetypes (60 total agents)
   for (let archetypeIndex = 0; archetypeIndex < agentArchetypes.length; archetypeIndex++) {
@@ -922,13 +935,13 @@ async function generateJobs() {
 
   for (let i = 0; i < JOBS_PER_MIN; i++) {
     try {
-      const job = await jobGenerator.generateJob();
+      const job = await simpleJobGenerator.generateJob();
 
       // Save job to database for tracking
       const dbJob = await prisma.job.create({
         data: {
-          category: job.category,
-          payload: JSON.stringify(job.payload),
+          category: 'general', // Simplified: no categories
+          payload: JSON.stringify({ prompt: job.prompt }),
           payout: job.payout,
           deadlineS: job.deadlineS,
         },
@@ -937,15 +950,13 @@ async function generateJobs() {
       // Add to Redis queue for worker processing
       await jobQueue.add('job', {
         dbJobId: dbJob.id, // Include database job ID for proper tracking
-        category: job.category,
-        payload: job.payload,
+        category: 'general',
+        payload: { prompt: job.prompt },
         payout: job.payout,
         deadlineS: job.deadlineS,
       } as any);
 
-      console.log(
-        `[jobs] ✅ Generated ${job.category} job: ${JSON.stringify(job.payload).substring(0, 100)}...`
-      );
+      console.log(`[jobs] ✅ Generated general job: ${job.prompt.substring(0, 100)}...`);
       successCount++;
     } catch (error) {
       console.error('[jobs] ❌ Failed to generate job:', (error as Error).message);
@@ -967,37 +978,35 @@ async function generateJobs() {
 }
 
 function grade(cat: string, p: any, artifact: string) {
-  // More reasonable grading that actually checks if the agent attempted the task
+  // Simplified grading for general jobs
   if (!artifact || artifact === '') return false;
 
-  if (cat === 'web_research') {
-    // Accept any response that seems like an attempt at answering
-    return artifact.length > 20; // At least some meaningful response
-  }
+  // For the simplified system, just check if agent provided a reasonable response
+  const response = artifact.trim();
 
-  if (cat === 'summarize') {
-    const n = (artifact || '').split(/\s+/).length;
-    return n > 0 && n <= ((p && p.maxWords) || 12) * 1.5; // Allow 50% over word limit
-  }
+  // Basic quality checks:
+  // 1. Must have some content
+  // 2. Should be longer than a trivial response
+  // 3. Should not be an obvious error message
+  if (response.length < 10) return false;
 
-  if (cat === 'classify') {
-    // Check if the answer is one of the provided labels
-    return p.labels && p.labels.includes(artifact);
-  }
+  // Reject obvious error responses
+  const errorPhrases = [
+    'error',
+    'failed',
+    'cannot',
+    'unable',
+    'sorry',
+    "don't know",
+    'not sure',
+    'no information',
+  ];
 
-  if (cat === 'math') {
-    // Actually evaluate the expression and check the answer
-    try {
-      // Simple eval for basic math (be careful with this in production!)
-      const expected = Function('"use strict"; return (' + p.expr + ')')();
-      const actual = parseFloat(artifact);
-      return Math.abs(expected - actual) < 0.001; // Allow small floating point differences
-    } catch (e) {
-      return false;
-    }
-  }
+  const lowerResponse = response.toLowerCase();
+  const hasErrorPhrase = errorPhrases.some((phrase) => lowerResponse.includes(phrase));
 
-  return false;
+  // Accept if it's a substantial response without obvious error indicators
+  return response.length >= 20 && !hasErrorPhrase;
 }
 
 const agentWorkers: any[] = [];
@@ -1015,12 +1024,14 @@ async function startAgentWorkers() {
       async (job: any) => {
         const started = Date.now();
 
-        // Create LangGraph agent with Vertex AI - no fallback
-        const agent = new LangGraphAgent(s.id, bp.temperature, bp.tools.split(',').filter(Boolean));
-        console.log(`[Worker] Using LangGraphAgent with Vertex AI for agent ${s.id}`);
+        // Create simple React agent with archetype-based tools
+        const agent = createAgentForBlueprint(s.id, bp.archetype || 'llm-only');
+        console.log(
+          `[Worker] Using SimpleReactAgent with archetype ${bp.archetype || 'llm-only'} for agent ${s.id}`
+        );
 
         console.log(
-          `[Worker] Agent ${s.id} (archetype: ${bp.archetype}) processing ${job.data.category} job ${job.data.dbJobId}`
+          `[Worker] Agent ${s.id} (archetype: ${bp.archetype || 'llm-only'}) processing general job ${job.data.dbJobId}`
         );
         const res: any = await agent.handle(job.data);
 
@@ -1108,8 +1119,8 @@ async function epochTick() {
       if (toolsSet.has(t)) toolsSet.delete(t);
       else toolsSet.add(t);
 
-      // Phase 5: Archetype mutation during reproduction
-      const archetypes = ['research-specialist', 'problem-solver', 'data-analyst', 'memory-expert'];
+      // Archetype mutation during reproduction (using tool names)
+      const archetypes = ['wikipedia', 'llm-only', 'web-browser', 'google-trends'];
       const mutatedArchetype =
         Math.random() < 0.1 // 10% chance of archetype mutation
           ? archetypes[Math.floor(Math.random() * archetypes.length)]
