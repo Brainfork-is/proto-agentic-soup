@@ -1,0 +1,19 @@
+{
+  "toolName": "roi_calculator",
+  "originalRequest": {
+    "taskDescription": "Calculate Return on Investment (ROI) as a percentage, rounded to one decimal place. ROI = ((Revenue - Cost) / Cost) * 100",
+    "expectedInputs": {
+      "revenue": "number",
+      "cost": "number"
+    },
+    "expectedOutput": "ROI percentage as a number, rounded to one decimal place."
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/cmeihcijr000hds5cgktawvid_roi_calculator_1755608867746_19bf163d.js",
+  "createdAt": "2025-08-19T13:07:47.748Z",
+  "createdBy": "cmeihcijr000hds5cgktawvid",
+  "templateUsed": "Mathematical Calculator Tool",
+  "hash": "19bf163d",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}

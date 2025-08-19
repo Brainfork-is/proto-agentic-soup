@@ -4,7 +4,6 @@
 
 import { ChatVertexAI } from '@langchain/google-vertexai';
 import { DynamicTool } from '@langchain/core/tools';
-import { z } from 'zod';
 import { log, logError } from '@soup/common';
 import { selectTemplate } from '../templates/toolTemplates';
 import crypto from 'crypto';
@@ -280,20 +279,13 @@ IMPORTANT: Generate ONLY the JavaScript code, no explanations or markdown format
   }
 }
 
-// Define Zod schema for tool parameters
-const codeGeneratorSchema = z.object({
-  taskDescription: z.string().describe('Description of the task requiring a custom tool'),
-  toolName: z.string().describe('Name for the generated tool'),
-  expectedInputs: z.record(z.string()).describe('Expected input parameters and their types'),
-  expectedOutput: z.string().describe('Description of expected output format'),
-});
+// Zod schema removed - DynamicTool doesn't support schema property
 
 // Create singleton instance with LangChain DynamicTool
 export const codeGeneratorTool = new DynamicTool({
   name: 'code_generator',
   description:
     'Generate custom JavaScript tools for specific tasks when existing tools are insufficient. Call with JSON object containing: taskDescription (string), toolName (string), expectedInputs (object mapping param names to type descriptions), expectedOutput (string description).',
-  schema: codeGeneratorSchema,
   func: async (input: any): Promise<string> => {
     try {
       log(`[codeGeneratorTool] DynamicTool func called with input type: ${typeof input}`);

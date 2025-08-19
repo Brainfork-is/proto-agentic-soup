@@ -1,0 +1,20 @@
+{
+  "toolName": "basic_calculator",
+  "originalRequest": {
+    "taskDescription": "Create a calculator tool that can add, subtract, multiply, and divide two numbers",
+    "expectedInputs": {
+      "operation": "string (add, subtract, multiply, divide)",
+      "num1": "number",
+      "num2": "number"
+    },
+    "expectedOutput": "JSON object with result and operation performed"
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/test-agent-001_basic_calculator_1755606278681_d190ac04.js",
+  "createdAt": "2025-08-19T12:24:38.684Z",
+  "createdBy": "test-agent-001",
+  "templateUsed": "Mathematical Calculator Tool",
+  "hash": "d190ac04",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}

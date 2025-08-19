@@ -1,0 +1,18 @@
+{
+  "toolName": "celsius_to_fahrenheit_converter",
+  "originalRequest": {
+    "taskDescription": "Convert temperature from Celsius to Fahrenheit using the formula F = (C * 9/5) + 32 and round to one decimal place.",
+    "expectedInputs": {
+      "celsius": "number"
+    },
+    "expectedOutput": "string: The temperature in Fahrenheit, rounded to one decimal place."
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/cmeihcijp000dds5c9idbwrpp_celsius_to_fahrenheit_converter_1755608867581_98adaa80.js",
+  "createdAt": "2025-08-19T13:07:47.588Z",
+  "createdBy": "cmeihcijp000dds5c9idbwrpp",
+  "templateUsed": "Data Formatting Tool",
+  "hash": "98adaa80",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}

@@ -1,0 +1,18 @@
+{
+  "toolName": "bookworm_discount_calculator",
+  "originalRequest": {
+    "taskDescription": "Calculate the final price of a bookstore order after applying a 15% discount for orders of $100 or more.",
+    "expectedInputs": {
+      "totalAmount": "number"
+    },
+    "expectedOutput": "The final price after discount, or the original price if no discount is applied."
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/test_bookworm_discount_calculator_1755607767340_6050ffc2.js",
+  "createdAt": "2025-08-19T12:49:27.344Z",
+  "createdBy": "unknown",
+  "templateUsed": "Mathematical Calculator Tool",
+  "hash": "6050ffc2",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}

@@ -1,0 +1,19 @@
+{
+  "toolName": "date_difference_calculator",
+  "originalRequest": {
+    "taskDescription": "Calculate the difference in days between two given dates.",
+    "expectedInputs": {
+      "date1": "string (YYYY-MM-DD)",
+      "date2": "string (YYYY-MM-DD)"
+    },
+    "expectedOutput": "number (total number of days)"
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/cmeikrmhj002rigl7lo2vy83m_date_difference_calculator_1755612011858_47b2442d.js",
+  "createdAt": "2025-08-19T14:00:11.874Z",
+  "createdBy": "cmeikrmhj002rigl7lo2vy83m",
+  "templateUsed": "Mathematical Calculator Tool",
+  "hash": "47b2442d",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}

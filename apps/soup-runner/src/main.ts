@@ -12,8 +12,11 @@ const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
 import { createAgentForBlueprint, simpleJobGenerator, llmGrader } from '@soup/agents';
-import { nameGenerator } from './services/nameGenerator';
+import { NameGenerator } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
+
+// Initialize name generator
+const nameGenerator = new NameGenerator();
 
 const app = Fastify();
 let redis: any;
@@ -815,7 +818,7 @@ app.get('/api/activity', async () => {
     where: { id: { in: agentIds } },
     select: { id: true, name: true },
   });
-  const agentNameMap = new Map(agents.map((a) => [a.id, a.name]));
+  const agentNameMap = new Map(agents.map((a: any) => [a.id, a.name]));
 
   const activities = [
     ...recentLedger.map((l: any) => ({
@@ -1180,7 +1183,7 @@ async function epochTick() {
     where: { alive: true },
     select: { id: true, name: true },
   });
-  const currentAgentNameMap = new Map(currentAgents.map((a) => [a.id, a.name]));
+  const currentAgentNameMap = new Map(currentAgents.map((a: any) => [a.id, a.name]));
 
   for (const s of states) {
     const bp = bps.find((b: any) => b.id === s.blueprintId)!;
@@ -1220,7 +1223,7 @@ async function epochTick() {
           {
             archetype: mutatedArchetype,
             temperature: newTemp,
-            tools: Array.from(toolsSet),
+            tools: Array.from(toolsSet) as string[],
           },
         ]);
         offspringName = names[0].fullName;

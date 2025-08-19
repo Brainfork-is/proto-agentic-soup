@@ -1,0 +1,18 @@
+{
+  "toolName": "parse_customer_order",
+  "originalRequest": {
+    "taskDescription": "Parse a JSON string representing a customer order, extracting the order ID and the name of each item.",
+    "expectedInputs": {
+      "jsonString": "string"
+    },
+    "expectedOutput": "JSON object with order_id (string) and item_names (array of strings). Example: {\"order_id\": \"ORD12345\", \"item_names\": [\"Denim Jacket\", \"Graphic Tee\"]}"
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/test_parse_customer_order_1755607768477_4d3da16c.js",
+  "createdAt": "2025-08-19T12:49:28.480Z",
+  "createdBy": "unknown",
+  "templateUsed": "Text Analysis Tool",
+  "hash": "4d3da16c",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}
