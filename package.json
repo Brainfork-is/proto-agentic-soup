@@ -28,6 +28,10 @@
     "prisma:migrate": "pnpm --filter @soup/soup-runner prisma:migrate",
     "build-agent": "pnpm --filter @soup/build-agent start",
     "build-agent:dev": "pnpm --filter @soup/build-agent dev",
+    "reset": "./reset-system.sh",
+    "status": "./system-status.sh",
+    "analyze-tools": "node analyze-tool-reuse.js",
+    "export-jobs": "cd apps/soup-runner && npx tsx src/export-jobs.ts",
     "prepare": "husky"
   },
   "devDependencies": {

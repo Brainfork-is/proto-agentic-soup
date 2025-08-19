@@ -54,20 +54,24 @@ export class SimpleJobGenerator {
   }
 
   private async generateJobBatch(): Promise<void> {
-    // 20% chance to encourage tool usage
-    const shouldEncourageTools = Math.random() <= 0.2;
-    const toolsInstruction = shouldEncourageTools
-      ? `\n\nTOOL USAGE ENCOURAGEMENT: For approximately half of these tasks, add a request to ground the information with sources. Use phrases like:
-- "Please cite specific sources or studies"
-- "Include recent examples from web research" 
-- "Reference current data or statistics"
-- "Look up current information on this topic"
-- "Provide sources to support your recommendations"
-- "Research recent developments in [topic]"
-This will encourage agents to use their web search, Wikipedia, and research tools instead of relying only on prior knowledge.`
-      : '';
+    // 50% chance to generate computational/tool-requiring tasks
+    const shouldGenerateComputationalTasks = Math.random() <= 0.5;
+    const taskTypeInstruction = shouldGenerateComputationalTasks
+      ? `\n\nCOMPUTATIONAL TASK FOCUS: Include tasks involving precise calculations, data processing, and algorithmic solutions:
+- Financial calculations (ROI, compound interest, loan payments, investment analysis with specific numbers)
+- Mathematical problem solving (percentage calculations, unit conversions, multi-step formulas)
+- Data analysis and statistical calculations with provided datasets
+- Algorithm implementations (sorting given lists, searching through data, transformations)
+- Validation and verification (checking formats, validating inputs against rules)
+- Text processing (parsing structured data, formatting, pattern extraction)
+- Time-based calculations (date differences, scheduling conflicts, time zone conversions)
+- Business logic (pricing with complex rules, discount calculations, commission structures)
+- Scientific calculations (physics problems, chemistry equations, engineering computations)
 
-    const prompt = `Generate exactly 10 diverse, actionable tasks that AI agents can complete immediately. Return them in JSON format.${toolsInstruction}
+Focus on tasks with specific numerical inputs and expected precise outputs.`
+      : `\n\nGENERAL TASK VARIETY: Include research, writing, analysis, and planning tasks that may benefit from tool usage for data gathering and verification.`;
+
+    const prompt = `Generate exactly 10 diverse, actionable tasks that AI agents can complete immediately. Return them in JSON format.${taskTypeInstruction}
 
 VARIETY REQUIREMENTS:
 - Mix different industries: technology, healthcare, education, finance, retail, entertainment, travel, food, manufacturing, real estate, sports, arts, etc.
@@ -77,12 +81,21 @@ VARIETY REQUIREMENTS:
 - Generate completely unique tasks - NO repetition of previous patterns
 
 TASK CATEGORIES TO EXPLORE (create diverse tasks across these domains):
+- Mathematical Calculations: compound interest, loan payments, ROI calculations, statistical analysis
+- Data Processing: sorting algorithms, data validation, format conversion, parsing tools
+- Financial Tools: investment calculators, tax calculators, budget planners, pricing models
+- Scientific Computing: physics calculations, chemistry formulas, engineering computations
+- Text Processing: pattern matching, string manipulation, format validation, parsing tools
+- Time & Date: scheduling algorithms, time zone conversions, duration calculations
+- Business Logic: discount calculators, inventory management, sales commission tools
+- Algorithm Implementation: search algorithms, optimization problems, data structures
+- Validation Systems: input validation, data verification, format checking tools
+- Unit Conversion: measurement conversions, currency calculations, scale transformations
 - Business Strategy: planning, analysis, process improvement
 - Content Creation: writing, design, marketing materials  
 - Education: explanations, tutorials, learning guides
 - Technology: comparisons, setup guides, troubleshooting
 - Health & Wellness: routines, advice, explanations
-- Finance: budgeting, analysis, recommendations
 - Travel & Lifestyle: planning, recommendations, comparisons
 - Creative Projects: brainstorming, design, ideation
 - Problem Solving: troubleshooting, optimization, solutions
