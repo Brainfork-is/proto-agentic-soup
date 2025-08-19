@@ -1,0 +1,19 @@
+{
+  "toolName": "flight_parser",
+  "originalRequest": {
+    "taskDescription": "Parse a JSON string representing a flight booking and extract specific fields for a given flight number. The JSON contains flight details, and the goal is to find the departure city, arrival city, and departure time for a specific flight number.",
+    "expectedInputs": {
+      "jsonData": "string",
+      "flightNumber": "string"
+    },
+    "expectedOutput": "JSON object containing departureCity, arrivalCity, and departureTime for the specified flight number, or an error message if the flight number is not found or the JSON is invalid."
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/cmeipzlrv003bb8mt7d9lnrd8_flight_parser_1755619079158_466cb93e.js",
+  "createdAt": "2025-08-19T15:57:59.172Z",
+  "createdBy": "cmeipzlrv003bb8mt7d9lnrd8",
+  "templateUsed": "Text Analysis Tool",
+  "hash": "466cb93e",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}

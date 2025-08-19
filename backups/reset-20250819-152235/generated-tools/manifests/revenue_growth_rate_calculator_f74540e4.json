@@ -1,0 +1,19 @@
+{
+  "toolName": "revenue_growth_rate_calculator",
+  "originalRequest": {
+    "taskDescription": "Calculate the Year-over-Year (YoY) Revenue Growth Rate given two revenue figures.",
+    "expectedInputs": {
+      "current_year_revenue": "number",
+      "previous_year_revenue": "number"
+    },
+    "expectedOutput": "The YoY growth rate as a percentage, formatted to two decimal places."
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/test_revenue_growth_rate_calculator_1755607766284_f74540e4.js",
+  "createdAt": "2025-08-19T12:49:26.290Z",
+  "createdBy": "unknown",
+  "templateUsed": "Mathematical Calculator Tool",
+  "hash": "f74540e4",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}

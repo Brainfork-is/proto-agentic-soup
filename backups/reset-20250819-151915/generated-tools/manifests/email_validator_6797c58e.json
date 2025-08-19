@@ -1,0 +1,18 @@
+{
+  "toolName": "email_validator",
+  "originalRequest": {
+    "taskDescription": "Validate an email address format. Checks for '@', a domain name, and a top-level domain. Returns 'Valid' or 'Invalid'.",
+    "expectedInputs": {
+      "email": "string"
+    },
+    "expectedOutput": "string: 'Valid' or 'Invalid'"
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/cmeihcijv000rds5cmgjaz3q2_email_validator_1755608867973_6797c58e.js",
+  "createdAt": "2025-08-19T13:07:47.975Z",
+  "createdBy": "cmeihcijv000rds5cmgjaz3q2",
+  "templateUsed": "Data Validation Tool",
+  "hash": "6797c58e",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}

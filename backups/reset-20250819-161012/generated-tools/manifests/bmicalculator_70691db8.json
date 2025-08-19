@@ -1,0 +1,19 @@
+{
+  "toolName": "bmicalculator",
+  "originalRequest": {
+    "taskDescription": "Calculates Body Mass Index (BMI) given weight in kilograms and height in meters. Returns the BMI rounded to one decimal place.",
+    "expectedInputs": {
+      "weightKg": "number",
+      "heightMeters": "number"
+    },
+    "expectedOutput": "The calculated BMI as a number, rounded to one decimal place."
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/cmeikrmhp0031igl752rs4yca_bmicalculator_1755611760555_70691db8.js",
+  "createdAt": "2025-08-19T13:56:00.567Z",
+  "createdBy": "cmeikrmhp0031igl752rs4yca",
+  "templateUsed": "Mathematical Calculator Tool",
+  "hash": "70691db8",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}

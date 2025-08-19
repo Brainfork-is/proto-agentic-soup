@@ -24,6 +24,7 @@ model Blueprint {
 model AgentState {
   id          String   @id @default(cuid())
   blueprintId String
+  name        String?  // Fantasy-style name like "Zephyr the Code-Weaver"
   balance     Int
   reputation  Float
   attempts    Int

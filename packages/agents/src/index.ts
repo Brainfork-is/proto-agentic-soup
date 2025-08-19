@@ -14,6 +14,16 @@ export type { SimpleJob } from './simpleJobGenerator';
 export { llmGrader, LLMGrader } from './llmGrader';
 export type { GradeResult } from './llmGrader';
 
+// Name generation
+export { NameGenerator } from './nameGenerator';
+export type { AgentName } from './nameGenerator';
+
+// Tool Builder Agent
+export { ToolBuilderAgent } from './ToolBuilderAgent';
+export { codeGeneratorTool } from './tools/codeGenerator';
+export { dynamicToolLoader } from './tools/dynamicToolLoader';
+export { toolValidator } from './tools/toolValidator';
+
 // Core utilities (kept for compatibility)
 export { memoryManager } from './agentMemory';
 

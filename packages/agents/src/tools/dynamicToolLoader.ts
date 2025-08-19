@@ -1,0 +1,396 @@
+/**
+ * Dynamic Tool Loader - Manages loading and execution of generated tools
+ */
+
+import { log, logError } from '@soup/common';
+import path from 'path';
+import fs from 'fs-extra';
+
+interface ToolManifest {
+  toolName: string;
+  originalRequest: {
+    taskDescription: string;
+    expectedInputs: Record<string, string>;
+    expectedOutput: string;
+  };
+  filePath: string;
+  createdAt: string;
+  createdBy: string;
+  templateUsed: string;
+  hash: string;
+  usageCount: number;
+  successCount: number;
+  failureCount: number;
+}
+
+interface LoadedTool {
+  name: string;
+  description: string;
+  invoke: (params: any) => Promise<string>;
+  manifest: ToolManifest;
+}
+
+export class DynamicToolLoader {
+  private toolRegistry: Map<string, LoadedTool> = new Map();
+  private manifestCache: Map<string, ToolManifest> = new Map();
+
+  private readonly GENERATED_TOOLS_DIR = path.join(__dirname, '../generated-tools');
+  private readonly CODE_DIR = path.join(this.GENERATED_TOOLS_DIR, 'code');
+  private readonly MANIFESTS_DIR = path.join(this.GENERATED_TOOLS_DIR, 'manifests');
+
+  constructor() {
+    // Ensure directories exist
+    this.ensureDirectories();
+  }
+
+  private async ensureDirectories(): Promise<void> {
+    await fs.ensureDir(this.CODE_DIR);
+    await fs.ensureDir(this.MANIFESTS_DIR);
+  }
+
+  /**
+   * Load all available tools for an agent
+   */
+  async loadToolsForAgent(agentId: string): Promise<LoadedTool[]> {
+    try {
+      log(`[DynamicToolLoader] Loading tools for agent: ${agentId}`);
+
+      // Load manifests
+      await this.loadAllManifests();
+
+      // Find tools created by this agent or high-success tools from others
+      const availableTools: LoadedTool[] = [];
+      let ownToolsCount = 0;
+      let sharedToolsCount = 0;
+
+      for (const [toolName, manifest] of this.manifestCache) {
+        try {
+          // Load tools created by this agent, or successful tools from others
+          const isOwnTool = manifest.createdBy === agentId;
+          const isSharedTool =
+            !isOwnTool &&
+            manifest.usageCount >= 5 &&
+            manifest.successCount / manifest.usageCount > 0.7;
+          const shouldLoad = isOwnTool || isSharedTool;
+
+          if (shouldLoad) {
+            const reason = isOwnTool
+              ? 'own tool'
+              : `shared tool (${manifest.successCount}/${manifest.usageCount} success rate)`;
+            log(`[DynamicToolLoader] Loading ${manifest.toolName} for agent ${agentId}: ${reason}`);
+
+            const tool = await this.loadSingleTool(toolName, manifest);
+            if (tool) {
+              availableTools.push(tool);
+              if (isOwnTool) ownToolsCount++;
+              else sharedToolsCount++;
+            }
+          }
+        } catch (error) {
+          logError(`[DynamicToolLoader] Failed to load tool ${toolName}:`, error);
+          // Mark tool for cleanup if it consistently fails
+          if (manifest.failureCount > 5) {
+            await this.markToolForCleanup(toolName, manifest);
+          }
+        }
+      }
+
+      log(
+        `[DynamicToolLoader] Loaded ${availableTools.length} tools for agent ${agentId} (${ownToolsCount} own, ${sharedToolsCount} shared)`
+      );
+      return availableTools;
+    } catch (error) {
+      logError('[DynamicToolLoader] Failed to load tools:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Load a specific tool by name
+   */
+  async loadToolByName(toolName: string): Promise<LoadedTool | null> {
+    try {
+      // Check registry first
+      if (this.toolRegistry.has(toolName)) {
+        return this.toolRegistry.get(toolName)!;
+      }
+
+      // Load from manifest
+      await this.loadAllManifests();
+
+      for (const [manifestKey, manifest] of this.manifestCache) {
+        if (manifest.toolName === toolName) {
+          return await this.loadSingleTool(manifestKey, manifest);
+        }
+      }
+
+      return null;
+    } catch (error) {
+      logError(`[DynamicToolLoader] Failed to load tool ${toolName}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Execute a tool and track success/failure
+   */
+  async executeTool(toolName: string, params: any): Promise<string> {
+    const tool = this.toolRegistry.get(toolName);
+
+    if (!tool) {
+      throw new Error(`Tool ${toolName} not found in registry`);
+    }
+
+    const startTime = Date.now();
+
+    try {
+      const manifest = tool.manifest;
+      log(
+        `[DynamicToolLoader] 🔧 EXECUTING TOOL: ${toolName} (created by ${manifest.createdBy}, used ${manifest.usageCount} times)`
+      );
+
+      // Execute with timeout
+      const timeoutPromise = new Promise<string>((_, reject) => {
+        setTimeout(() => reject(new Error('Tool execution timeout')), 15000); // 15 second timeout
+      });
+
+      const executionPromise = tool.invoke(params);
+      const result = await Promise.race([executionPromise, timeoutPromise]);
+
+      const executionTime = Date.now() - startTime;
+      log(`[DynamicToolLoader] Tool ${toolName} executed successfully in ${executionTime}ms`);
+
+      // Update success metrics
+      await this.updateToolMetrics(tool.manifest, true);
+
+      return result;
+    } catch (error) {
+      const executionTime = Date.now() - startTime;
+      logError(`[DynamicToolLoader] Tool ${toolName} failed after ${executionTime}ms:`, error);
+
+      // Update failure metrics
+      await this.updateToolMetrics(tool.manifest, false);
+
+      // Return error as JSON
+      return JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        toolName,
+        executionTime,
+      });
+    }
+  }
+
+  /**
+   * Load all manifests into cache
+   */
+  private async loadAllManifests(): Promise<void> {
+    try {
+      const manifestFiles = await fs.readdir(this.MANIFESTS_DIR);
+
+      for (const file of manifestFiles) {
+        if (file.endsWith('.json')) {
+          const manifestPath = path.join(this.MANIFESTS_DIR, file);
+          const manifest: ToolManifest = await fs.readJson(manifestPath);
+          const key = file.replace('.json', '');
+          this.manifestCache.set(key, manifest);
+        }
+      }
+    } catch (error) {
+      logError('[DynamicToolLoader] Failed to load manifests:', error);
+    }
+  }
+
+  /**
+   * Load a single tool from its manifest
+   */
+  private async loadSingleTool(
+    manifestKey: string,
+    manifest: ToolManifest
+  ): Promise<LoadedTool | null> {
+    try {
+      // Check if already loaded
+      if (this.toolRegistry.has(manifest.toolName)) {
+        return this.toolRegistry.get(manifest.toolName)!;
+      }
+
+      const toolFilePath = path.resolve(manifest.filePath);
+
+      // Check if file exists
+      if (!(await fs.pathExists(toolFilePath))) {
+        logError(`[DynamicToolLoader] Tool file not found: ${toolFilePath}`);
+        return null;
+      }
+
+      // Read and validate tool code
+      const toolCode = await fs.readFile(toolFilePath, 'utf-8');
+
+      // Create safe execution context
+      const tool = await this.createToolFromCode(toolCode, manifest);
+
+      if (tool) {
+        this.toolRegistry.set(manifest.toolName, tool);
+        log(`[DynamicToolLoader] Loaded tool: ${manifest.toolName}`);
+      }
+
+      return tool;
+    } catch (error) {
+      logError(`[DynamicToolLoader] Failed to load tool from manifest ${manifestKey}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Create tool instance from code string
+   */
+  private async createToolFromCode(
+    code: string,
+    manifest: ToolManifest
+  ): Promise<LoadedTool | null> {
+    try {
+      // Create a safe module environment
+      const moduleCode = `
+        ${code}
+        
+        // Export the tool
+        if (typeof ${manifest.toolName} !== 'undefined') {
+          module.exports = ${manifest.toolName};
+        } else {
+          throw new Error('Tool not found in code: ${manifest.toolName}');
+        }
+      `;
+
+      // Use dynamic import for safe code execution
+      const tempFilePath = path.join(this.CODE_DIR, `temp_${Date.now()}_${manifest.hash}.js`);
+      await fs.writeFile(tempFilePath, moduleCode);
+
+      try {
+        // Import the tool module
+        const toolModule = await import(tempFilePath);
+        const toolInstance = toolModule.default || toolModule;
+
+        // Validate tool structure
+        if (!toolInstance.name || !toolInstance.invoke) {
+          throw new Error('Invalid tool structure: missing name or invoke method');
+        }
+
+        // Wrap invoke method with safety checks
+        const safeInvoke = async (params: any): Promise<string> => {
+          try {
+            return await toolInstance.invoke(params);
+          } catch (error) {
+            return JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : 'Tool execution failed',
+              toolName: manifest.toolName,
+            });
+          }
+        };
+
+        const loadedTool: LoadedTool = {
+          name: toolInstance.name,
+          description: toolInstance.description || manifest.originalRequest.taskDescription,
+          invoke: safeInvoke,
+          manifest,
+        };
+
+        // Clean up temp file
+        await fs.remove(tempFilePath).catch(() => {}); // Ignore cleanup errors
+
+        return loadedTool;
+      } finally {
+        // Always try to clean up temp file
+        await fs.remove(tempFilePath).catch(() => {});
+      }
+    } catch (error) {
+      logError('[DynamicToolLoader] Failed to create tool from code:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Update tool usage metrics
+   */
+  private async updateToolMetrics(manifest: ToolManifest, success: boolean): Promise<void> {
+    try {
+      manifest.usageCount++;
+      if (success) {
+        manifest.successCount++;
+      } else {
+        manifest.failureCount++;
+      }
+
+      // Update manifest file
+      const manifestKey = `${manifest.toolName}_${manifest.hash}`;
+      const manifestPath = path.join(this.MANIFESTS_DIR, `${manifestKey}.json`);
+
+      await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+
+      // Update cache
+      this.manifestCache.set(manifestKey, manifest);
+    } catch (error) {
+      logError('[DynamicToolLoader] Failed to update tool metrics:', error);
+    }
+  }
+
+  /**
+   * Mark tool for cleanup due to poor performance
+   */
+  private async markToolForCleanup(manifestKey: string, manifest: ToolManifest): Promise<void> {
+    try {
+      log(
+        `[DynamicToolLoader] Marking tool for cleanup: ${manifest.toolName} (success rate: ${manifest.successCount / manifest.usageCount})`
+      );
+
+      // Move to cleanup directory instead of deleting immediately
+      const cleanupDir = path.join(this.GENERATED_TOOLS_DIR, 'cleanup');
+      await fs.ensureDir(cleanupDir);
+
+      // Move files
+      const manifestPath = path.join(this.MANIFESTS_DIR, `${manifestKey}.json`);
+      const codePath = path.resolve(manifest.filePath);
+
+      if (await fs.pathExists(manifestPath)) {
+        await fs.move(manifestPath, path.join(cleanupDir, `${manifestKey}.json`));
+      }
+
+      if (await fs.pathExists(codePath)) {
+        const codeFileName = path.basename(codePath);
+        await fs.move(codePath, path.join(cleanupDir, codeFileName));
+      }
+
+      // Remove from caches
+      this.manifestCache.delete(manifestKey);
+      this.toolRegistry.delete(manifest.toolName);
+    } catch (error) {
+      logError('[DynamicToolLoader] Failed to mark tool for cleanup:', error);
+    }
+  }
+
+  /**
+   * Get tool registry statistics
+   */
+  getRegistryStats(): { totalTools: number; averageSuccessRate: number; toolNames: string[] } {
+    const tools = Array.from(this.toolRegistry.values());
+    const totalTools = tools.length;
+    const toolNames = tools.map((t) => t.name);
+
+    if (totalTools === 0) {
+      return { totalTools: 0, averageSuccessRate: 0, toolNames: [] };
+    }
+
+    const avgSuccessRate =
+      tools
+        .filter((t) => t.manifest.usageCount > 0)
+        .reduce((sum, t) => sum + t.manifest.successCount / t.manifest.usageCount, 0) / totalTools;
+
+    return {
+      totalTools,
+      averageSuccessRate: avgSuccessRate,
+      toolNames,
+    };
+  }
+}
+
+// Create singleton instance
+export const dynamicToolLoader = new DynamicToolLoader();

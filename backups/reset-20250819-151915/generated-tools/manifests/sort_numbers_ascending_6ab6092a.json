@@ -1,0 +1,18 @@
+{
+  "toolName": "sort_numbers_ascending",
+  "originalRequest": {
+    "taskDescription": "Sort a list of numbers in ascending order.",
+    "expectedInputs": {
+      "numbers": "Array<number>"
+    },
+    "expectedOutput": "A JSON array of numbers sorted in ascending order."
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/cmeihcijs000jds5cyrvne8xr_sort_numbers_ascending_1755609433348_6ab6092a.js",
+  "createdAt": "2025-08-19T13:17:13.355Z",
+  "createdBy": "cmeihcijs000jds5cyrvne8xr",
+  "templateUsed": "Data Processing Tool",
+  "hash": "6ab6092a",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}

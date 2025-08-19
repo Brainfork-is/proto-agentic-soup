@@ -1,0 +1,18 @@
+{
+  "toolName": "isbn10_validator",
+  "originalRequest": {
+    "taskDescription": "Validate an ISBN-10 number. The validation algorithm is: (10*d1 + 9*d2 + ... + 1*d10) mod 11 == 0. The function should accept an ISBN-10 string and return 'Valid' or 'Invalid'.",
+    "expectedInputs": {
+      "isbn": "string"
+    },
+    "expectedOutput": "string: 'Valid' or 'Invalid'"
+  },
+  "filePath": "/Users/phil/Projects/agentic-soup/packages/agents/src/generated-tools/code/cmeihcijo000bds5c9mwrcytz_isbn10_validator_1755609435337_ab60fbc3.js",
+  "createdAt": "2025-08-19T13:17:15.339Z",
+  "createdBy": "cmeihcijo000bds5c9mwrcytz",
+  "templateUsed": "Data Validation Tool",
+  "hash": "ab60fbc3",
+  "usageCount": 0,
+  "successCount": 0,
+  "failureCount": 0
+}
