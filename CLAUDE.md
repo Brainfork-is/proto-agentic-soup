@@ -54,6 +54,20 @@ pnpm -r build            # Build all packages (TypeScript compilation)
 pnpm test                # Run tests (when implemented)
 ```
 
+### System Management
+
+```bash
+# Check system status (agents, jobs, tools, backups)
+pnpm status              # Show comprehensive system status
+
+# Export job data to CSV
+pnpm export-jobs         # Export last 50 jobs
+pnpm export-jobs -- --all --output filename.csv  # Export all jobs to custom file
+
+# Reset system with backup
+pnpm reset               # Creates timestamped backup then resets everything
+```
+
 ## Architecture
 
 ### Service Architecture

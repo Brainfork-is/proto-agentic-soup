@@ -12,6 +12,7 @@ const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
 import { createAgentForBlueprint, simpleJobGenerator, llmGrader } from '@soup/agents';
+import { nameGenerator } from './services/nameGenerator';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
 const app = Fastify();
@@ -350,7 +351,7 @@ app.get('/dashboard', async (request, reply) => {
             container.innerHTML = data.map(agent => 
                 '<div class="agent-item">' +
                     '<span class="agent-status ' + (agent.alive ? 'alive' : 'dead') + '"></span>' +
-                    '<strong>' + agent.id.substring(0, 8) + '...</strong><br>' +
+                    '<strong>' + (agent.name || agent.id.substring(0, 8) + '...') + '</strong><br>' +
                     'Balance: ' + agent.balance + ' | Wins: ' + agent.wins + '/' + agent.attempts + ' | Temp: ' + agent.temperature + '<br>' +
                     'Tools: ' + agent.tools + ' | Model: ' + agent.llmModel +
                 '</div>'
@@ -595,12 +596,13 @@ app.get('/api/agents', async () => {
 
     // Validate archetype or default to llm-only
     const getToolsForArchetype = (archetype: string): string => {
-      const validTools = ['wikipedia', 'llm-only', 'web-browser', 'google-trends'];
+      const validTools = ['wikipedia', 'llm-only', 'web-browser', 'google-trends', 'tool-builder'];
       return validTools.includes(archetype) ? archetype : 'llm-only';
     };
 
     return {
       id: agent.id,
+      name: agent.name,
       alive: agent.alive,
       balance: agent.balance,
       wins: agent.wins,
@@ -690,12 +692,13 @@ app.get('/api/jobs', async () => {
                             'llm-only',
                             'web-browser',
                             'google-trends',
+                            'tool-builder',
                           ];
                           return validTools.includes(archetype) ? [archetype] : ['llm-only'];
                         };
 
                         agentInfo = {
-                          id: agent.id.substring(0, 8) + '...',
+                          id: agent.name || agent.id.substring(0, 8) + '...',
                           temperature: blueprint.temperature,
                           tools: getToolsForArchetype(blueprint.archetype || 'llm-only'),
                           llmModel: blueprint.llmModel,
@@ -806,13 +809,20 @@ app.get('/api/activity', async () => {
     orderBy: { ts: 'desc' },
   });
 
+  // Get agent names for the activity log
+  const agentIds = [...new Set(recentLedger.map((l: any) => l.agentId))];
+  const agents = await prisma.agentState.findMany({
+    where: { id: { in: agentIds } },
+    select: { id: true, name: true },
+  });
+  const agentNameMap = new Map(agents.map((a) => [a.id, a.name]));
+
   const activities = [
     ...recentLedger.map((l: any) => ({
       timestamp: l.ts,
       action:
-        'Agent ' +
-        l.agentId.substring(0, 8) +
-        '... ' +
+        (agentNameMap.get(l.agentId) || `Agent ${l.agentId.substring(0, 8)}...`) +
+        ' ' +
         (l.delta > 0 ? 'earned' : 'spent') +
         ' ' +
         Math.abs(l.delta) +
@@ -859,57 +869,91 @@ async function seedIfEmpty() {
     fs.readFileSync(path.join(__dirname, '../../../seeds', 'archetypes.json'), 'utf8')
   );
 
-  log(`[seed] Creating 60 agents from ${seeds.agents.length} archetypes...`);
-
   // Create agents with tool-based archetypes (matching SimpleReactAgent types)
-  const agentArchetypes = ['wikipedia', 'llm-only', 'web-browser', 'google-trends'];
+  const TEST_TOOL_BUILDER_ONLY = process.env.TEST_TOOL_BUILDER_ONLY === '1';
+  const agentArchetypes = TEST_TOOL_BUILDER_ONLY
+    ? ['tool-builder']
+    : ['wikipedia', 'llm-only', 'web-browser', 'google-trends', 'tool-builder'];
 
-  // Create 15 variants for each of the 4 specialized archetypes (60 total agents)
+  // Create variants - 60 total agents normally, or 20 tool-builder agents in test mode
+  const totalAgents = TEST_TOOL_BUILDER_ONLY ? 20 : 60;
+  const variantsPerArchetype = Math.floor(totalAgents / agentArchetypes.length);
+
+  log(
+    `[seed] Creating ${totalAgents} agents from ${agentArchetypes.length} archetypes${TEST_TOOL_BUILDER_ONLY ? ' (TOOL-BUILDER TEST MODE)' : ''}...`
+  );
+
+  // First, collect all agent configurations for batch name generation
+  const agentConfigs = [];
   for (let archetypeIndex = 0; archetypeIndex < agentArchetypes.length; archetypeIndex++) {
     const archetypeType = agentArchetypes[archetypeIndex];
-    const baseArchetype = seeds.agents[archetypeIndex % seeds.agents.length]; // Rotate through base seeds
+    const baseArchetype = seeds.agents[archetypeIndex % seeds.agents.length];
 
-    for (let variant = 0; variant < 15; variant++) {
-      // Create mutations for each variant
+    for (let variant = 0; variant < variantsPerArchetype; variant++) {
       const mutatedTemperature = mutateTemperature(baseArchetype.temperature, variant);
       const mutatedTools = mutateTools(baseArchetype.tools, variant);
       const mutatedCoopThreshold = mutateCoopThreshold(baseArchetype.coopThreshold, variant);
 
-      // Create blueprint for this specialized archetype variant
-      const blueprint = await prisma.blueprint.create({
-        data: {
-          version: 1,
-          llmModel: baseArchetype.llmModel,
-          temperature: mutatedTemperature,
-          tools: mutatedTools.join(','),
-          archetype: archetypeType, // Phase 5: Assign specialized archetype
-          coopThreshold: mutatedCoopThreshold,
-          minBalance: 30,
-          mutationRate: 0.15,
-          maxOffspring: 2,
-        },
+      agentConfigs.push({
+        archetypeType,
+        baseArchetype,
+        mutatedTemperature,
+        mutatedTools,
+        mutatedCoopThreshold,
       });
-
-      // Create agent state for this variant
-      await prisma.agentState.create({
-        data: {
-          blueprintId: blueprint.id,
-          balance: 10 + Math.floor(Math.random() * 5), // 10-14 starting balance variance
-          reputation: 0.4 + Math.random() * 0.2, // 0.4-0.6 starting reputation
-          attempts: 0,
-          wins: 0,
-          meanTtcSec: 0,
-          alive: true,
-        },
-      });
-
-      log(
-        `[seed] Created ${archetypeType}_v${variant}: temp=${mutatedTemperature.toFixed(2)}, tools=[${mutatedTools.join(',')}], archetype=${archetypeType}`
-      );
     }
   }
 
-  log('[seed] Seeding complete: 60 agents created');
+  // Generate all names in one batch LLM call
+  log(`[seed] Generating ${agentConfigs.length} fantasy names...`);
+  const names = await nameGenerator.generateNames(
+    agentConfigs.map((config) => ({
+      archetype: config.archetypeType,
+      temperature: config.mutatedTemperature,
+      tools: config.mutatedTools,
+    }))
+  );
+
+  // Now create agents with their names
+  for (let i = 0; i < agentConfigs.length; i++) {
+    const config = agentConfigs[i];
+    const agentName = names[i];
+
+    // Create blueprint for this specialized archetype variant
+    const blueprint = await prisma.blueprint.create({
+      data: {
+        version: 1,
+        llmModel: config.baseArchetype.llmModel,
+        temperature: config.mutatedTemperature,
+        tools: config.mutatedTools.join(','),
+        archetype: config.archetypeType,
+        coopThreshold: config.mutatedCoopThreshold,
+        minBalance: 30,
+        mutationRate: 0.15,
+        maxOffspring: 2,
+      },
+    });
+
+    // Create agent state with generated name
+    await prisma.agentState.create({
+      data: {
+        blueprintId: blueprint.id,
+        name: agentName.fullName,
+        balance: 10 + Math.floor(Math.random() * 5), // 10-14 starting balance variance
+        reputation: 0.4 + Math.random() * 0.2, // 0.4-0.6 starting reputation
+        attempts: 0,
+        wins: 0,
+        meanTtcSec: 0,
+        alive: true,
+      },
+    });
+
+    log(
+      `[seed] Created "${agentName.fullName}": archetype=${config.archetypeType}, temp=${config.mutatedTemperature.toFixed(2)}, tools=[${config.mutatedTools.join(',')}]`
+    );
+  }
+
+  log(`[seed] Seeding complete: ${totalAgents} agents created`);
 }
 
 // Mutation functions for creating variants
@@ -1131,6 +1175,13 @@ async function epochTick() {
 
   // reproduce
   const bps = await prisma.blueprint.findMany();
+  // Get current agent names for logging
+  const currentAgents = await prisma.agentState.findMany({
+    where: { alive: true },
+    select: { id: true, name: true },
+  });
+  const currentAgentNameMap = new Map(currentAgents.map((a) => [a.id, a.name]));
+
   for (const s of states) {
     const bp = bps.find((b: any) => b.id === s.blueprintId)!;
     if (s.balance >= bp.minBalance) {
@@ -1162,9 +1213,26 @@ async function epochTick() {
         },
       });
 
+      // Generate a name for the offspring
+      let offspringName: string;
+      try {
+        const names = await nameGenerator.generateNames([
+          {
+            archetype: mutatedArchetype,
+            temperature: newTemp,
+            tools: Array.from(toolsSet),
+          },
+        ]);
+        offspringName = names[0].fullName;
+      } catch (error) {
+        logError('[reproduction] Failed to generate name for offspring:', error);
+        offspringName = `Offspring of ${currentAgentNameMap.get(s.id) || s.id.substring(0, 8)}`;
+      }
+
       await prisma.agentState.create({
         data: {
           blueprintId: child.id,
+          name: offspringName,
           balance: 5,
           reputation: 0.5,
           attempts: 0,

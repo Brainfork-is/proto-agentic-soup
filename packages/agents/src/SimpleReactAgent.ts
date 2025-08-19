@@ -11,7 +11,12 @@ import { SerpAPI } from '@langchain/community/tools/serpapi';
 import { JobData, log, logError } from '@soup/common';
 
 // Agent archetype types
-export type AgentArchetype = 'llm-only' | 'web-browser' | 'wikipedia' | 'google-trends';
+export type AgentArchetype =
+  | 'llm-only'
+  | 'web-browser'
+  | 'wikipedia'
+  | 'google-trends'
+  | 'tool-builder';
 
 // Create Vertex AI LLM instance
 function createVertexAILLM() {
@@ -229,18 +234,31 @@ Always provide complete, actionable responses based on the tools at your disposa
 }
 
 // Factory function to create agents based on blueprint archetype
-export function createAgentForBlueprint(agentId: string, archetype: string): SimpleReactAgent {
+export function createAgentForBlueprint(
+  agentId: string,
+  archetype: string
+): SimpleReactAgent | any {
+  // Import ToolBuilderAgent here to avoid circular dependencies
+  // eslint-disable-next-line @typescript-eslint/no-var-requires, no-undef
+  const ToolBuilderAgent = require('./ToolBuilderAgent').ToolBuilderAgent;
+
   // Validate archetype is one of our supported types
   const validArchetypes: AgentArchetype[] = [
     'llm-only',
     'web-browser',
     'wikipedia',
     'google-trends',
+    'tool-builder',
   ];
   const isValidArchetype = validArchetypes.includes(archetype as AgentArchetype);
 
   // Use archetype directly (no mapping needed) or default to llm-only
   const agentArchetype = isValidArchetype ? (archetype as AgentArchetype) : 'llm-only';
+
+  // Create specialized agent for tool-builder archetype
+  if (agentArchetype === 'tool-builder') {
+    return new ToolBuilderAgent(agentId);
+  }
 
   return new SimpleReactAgent(agentId, agentArchetype);
 }

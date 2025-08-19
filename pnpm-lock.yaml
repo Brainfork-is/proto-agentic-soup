@@ -165,6 +165,9 @@ importers:
       cheerio:
         specifier: ^1.1.2
         version: 1.1.2
+      fs-extra:
+        specifier: ^11.2.0
+        version: 11.3.1
       google-auth-library:
         specifier: ^9.0.0
         version: 9.15.1
@@ -181,6 +184,9 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
+      '@types/fs-extra':
+        specifier: ^11.0.4
+        version: 11.0.4
       '@types/mathjs':
         specifier: ^9.4.2
         version: 9.4.2
