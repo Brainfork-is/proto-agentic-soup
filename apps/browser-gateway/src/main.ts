@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { chromium, Browser } from 'playwright';
-import { loadBrowserConfig } from '@soup/common';
+import { loadBrowserConfig, log } from '@soup/common';
 
 const cfg = loadBrowserConfig();
 const app = Fastify();
@@ -19,6 +19,7 @@ app.post('/run', async (req, reply) => {
   const steps: any[] = b.steps || [];
 
   try {
+    // eslint-disable-next-line no-undef
     const u = new URL(url);
     const hostname = u.hostname;
 
@@ -74,4 +75,4 @@ app.post('/run', async (req, reply) => {
 });
 
 const port = cfg.BROWSER_GATEWAY_PORT;
-app.listen({ port, host: '0.0.0.0' }).then(() => console.log(`[browser-gateway] ${port}`));
+app.listen({ port, host: '0.0.0.0' }).then(() => log(`[browser-gateway] ${port}`));
