@@ -23,6 +23,8 @@ export { ToolBuilderAgent } from './ToolBuilderAgent';
 export { codeGeneratorTool } from './tools/codeGenerator';
 export { dynamicToolLoader } from './tools/dynamicToolLoader';
 export { toolValidator } from './tools/toolValidator';
+export { capabilityTools } from './capabilityTools';
+export { tryCompositionFirst } from './composeFirst';
 
 // Core utilities (kept for compatibility)
 export { memoryManager } from './agentMemory';
