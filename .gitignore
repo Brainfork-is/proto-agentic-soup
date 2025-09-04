@@ -1,3 +1,4 @@
+backups/
 packages/agents/src/generated-tools/
 # Node & pnpm
 node_modules/

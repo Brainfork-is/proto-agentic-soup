@@ -37,7 +37,7 @@ function createVertexAILLM() {
 
 // Convert our tool interface to LangChain-compatible tools
 function createLangChainTool(tool: any) {
-  return {
+  return new DynamicTool({
     name: tool.name,
     description: tool.description,
     func: async (input: string) => {
@@ -45,17 +45,19 @@ function createLangChainTool(tool: any) {
         // Parse input if it's a JSON string
         let params;
         try {
-          params = JSON.parse(input);
+          params = typeof input === 'string' ? JSON.parse(input) : input;
         } catch {
           // If not JSON, treat as simple string parameter
           params = { input };
         }
 
-        return await tool.invoke(params);
+        const result = await tool.invoke(params);
+        // Ensure a string is returned
+        return typeof result === 'string' ? result : JSON.stringify(result);
       } catch (error) {
         const errorMsg =
           error && typeof error === 'object' && 'message' in error
-            ? error.message
+            ? (error as any).message
             : 'Tool execution failed';
         return JSON.stringify({
           success: false,
@@ -63,7 +65,7 @@ function createLangChainTool(tool: any) {
         });
       }
     },
-  };
+  });
 }
 
 export class ToolBuilderAgent {
@@ -253,37 +255,104 @@ Always provide actionable, complete responses using the best available tools.`;
       let newToolsCreated = false;
       let toolsUsed = false;
 
-      for (const msg of messages) {
-        if (msg.tool_calls || msg.additional_kwargs?.tool_calls) {
-          toolsUsed = true;
-          const toolCalls = msg.tool_calls || msg.additional_kwargs?.tool_calls || [];
+      // Helper to coerce message content to string
+      const toStringContent = (content: any): string => {
+        if (typeof content === 'string') return content;
+        if (Array.isArray(content)) {
+          // Try to find a text-like entry
+          for (const item of content) {
+            if (typeof item === 'string') return item;
+            if (item && typeof item === 'object') {
+              if (typeof (item as any).text === 'string') return (item as any).text;
+              if (typeof (item as any).content === 'string') return (item as any).content;
+            }
+          }
+          return JSON.stringify(content);
+        }
+        if (content && typeof content === 'object') {
+          if (typeof (content as any).text === 'string') return (content as any).text;
+          if (typeof (content as any).content === 'string') return (content as any).content;
+          return JSON.stringify(content);
+        }
+        return String(content ?? '');
+      };
 
+      // Build an index from tool_call_id -> tool result content
+      const toolResultById = new Map<string, { name?: string; content: string }>();
+      for (const msg of messages) {
+        const toolCallId =
+          (msg as any).tool_call_id ?? (msg as any).additional_kwargs?.tool_call_id;
+        const msgName = (msg as any).name ?? (msg as any).additional_kwargs?.name;
+        const msgType = (msg as any)._getType?.() ?? (msg as any).type;
+        // ToolMessage in LangChain typically has type 'tool'
+        if (toolCallId && (msgType === 'tool' || typeof (msg as any).content !== 'undefined')) {
+          try {
+            const contentStr = toStringContent((msg as any).content);
+            toolResultById.set(toolCallId, { name: msgName, content: contentStr });
+          } catch {
+            // ignore content extraction errors
+          }
+        }
+      }
+
+      for (const msg of messages) {
+        const toolCalls =
+          (msg as any).tool_calls || (msg as any).additional_kwargs?.tool_calls || [];
+        if (toolCalls && toolCalls.length > 0) {
+          toolsUsed = true;
           for (const call of toolCalls) {
-            if (call.name === 'code_generator') {
-              // Check if tool creation was actually successful
+            if (call?.name === 'code_generator') {
               try {
                 log(
                   `[ToolBuilderAgent] Full tool call structure: ${JSON.stringify(call, null, 2)}`
                 );
 
-                // Try different possible output locations in LangGraph tool calls
-                const outputStr = call.output || call.result || call.return_value || '{}';
-                log(`[ToolBuilderAgent] Raw code_generator output: ${JSON.stringify(outputStr)}`);
+                // Prefer matching ToolMessage by tool_call_id
+                let outputStr: string | undefined;
+                const callId: string | undefined = call.id || call.tool_call_id || call.call_id;
+                if (callId && toolResultById.has(callId)) {
+                  const rec = toolResultById.get(callId)!;
+                  outputStr = rec.content;
+                }
 
-                const result = JSON.parse(outputStr);
-                log(`[ToolBuilderAgent] Parsed result: ${JSON.stringify(result)}`);
+                // Fallbacks (some runtimes might inline results differently)
+                if (!outputStr) {
+                  outputStr = call.output || call.result || call.return_value;
+                }
 
-                if (result.success === true) {
+                if (!outputStr || typeof outputStr !== 'string') {
+                  // As a last resort, try to find the last tool result message for code_generator
+                  const lastToolMsg = messages
+                    .slice()
+                    .reverse()
+                    .find((m: any) => {
+                      const mType = m?._getType?.() ?? m?.type;
+                      const mName = m?.name ?? m?.additional_kwargs?.name;
+                      return (
+                        mType === 'tool' && (mName === 'code_generator' || mName === call?.name)
+                      );
+                    });
+                  if (lastToolMsg) {
+                    outputStr = toStringContent((lastToolMsg as any).content);
+                  }
+                }
+
+                log(
+                  `[ToolBuilderAgent] Raw code_generator output: ${JSON.stringify(outputStr ?? '{}')}`
+                );
+
+                const parsed = JSON.parse(outputStr ?? '{}');
+                log(`[ToolBuilderAgent] Parsed result: ${JSON.stringify(parsed)}`);
+
+                if (parsed && parsed.success === true) {
                   newToolsCreated = true;
                   log(
-                    `[ToolBuilderAgent] Agent ${this.id} successfully created tool: ${result.toolName || 'unknown'}`
+                    `[ToolBuilderAgent] Agent ${this.id} successfully created tool: ${parsed.toolName || 'unknown'}`
                   );
-
-                  // Reload tools to include newly created tool
                   await this.reloadTools();
                 } else {
                   log(
-                    `[ToolBuilderAgent] Agent ${this.id} attempted tool creation but failed: ${result.error || 'Unknown error'}`
+                    `[ToolBuilderAgent] Agent ${this.id} attempted tool creation but failed: ${parsed?.error || 'Unknown error'}`
                   );
                 }
               } catch (parseError) {
@@ -291,6 +360,7 @@ Always provide actionable, complete responses using the best available tools.`;
                   `[ToolBuilderAgent] Agent ${this.id} called code_generator but couldn't parse result: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`
                 );
               }
+              // Only need to process the first code_generator call per message
               break;
             }
           }
