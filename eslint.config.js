@@ -6,7 +6,14 @@ const prettierConfig = require('eslint-config-prettier');
 
 module.exports = [
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/*.d.ts', 'apps/**/public/**', 'runs/**'],
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/*.d.ts',
+      'apps/**/public/**',
+      'runs/**',
+      'packages/agents/src/test-*.ts',
+    ],
   },
   js.configs.recommended,
   {

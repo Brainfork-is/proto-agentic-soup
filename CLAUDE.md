@@ -19,9 +19,12 @@ pnpm i                    # Install all dependencies
 ### Running Services
 
 ```bash
-# Start infrastructure
-pnpm redis:up             # Start Redis container
-pnpm redis:down           # Stop Redis container
+# Redis (local)
+# Ensure a local Redis server is running on 6379.
+# Examples:
+#   macOS (Homebrew): brew services start redis
+#   Generic:          pnpm redis:start   # uses `redis-server --daemonize yes`
+#   Stop:             pnpm redis:stop    # uses `redis-cli shutdown`
 
 # Database setup
 pnpm --filter @soup/soup-runner prisma:generate  # Generate Prisma client
@@ -200,7 +203,7 @@ When running development servers or any background processes:
 ### Environment Setup
 
 - The soup-runner needs a local `.env` file with `DATABASE_URL=file:./dev.db` for Prisma
-- Redis must be running (`pnpm redis:up`) before starting the full system
+- Redis must be running locally on `localhost:6379` (e.g., `brew services start redis` or `pnpm redis:start`) before starting the full system
 - Database must be initialized (`pnpm prisma:migrate`) before first run
 
 ### Pre-Push Checklist

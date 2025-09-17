@@ -43,7 +43,7 @@ Default ports
 - soup-runner: `3000` (API: `/healthz`, `/leaderboard`)
 - browser-gateway: `3100` (API: `/healthz`, `/run`)
 - site-kb: `3200` (static pages agents browse)
-- Redis: `6379` (via `infra/docker-compose.yml`)
+- Redis: `6379` (local service)
 
 Key behaviors
 
@@ -63,9 +63,10 @@ Key behaviors
 Notes:
 
 - Node 20.x LTS is pinned for this repo. Use `nvm use` (reads `.nvmrc`), or Volta (auto-picks from `package.json#volta`). Newer majors (e.g., Node 23) may emit deprecation warnings and have ecosystem incompatibilities.
-- To run the full runner (not bootstrap), start Redis (`cd infra && docker compose up -d`) and generate Prisma client:
+- To run the full runner (not bootstrap), start a local Redis server and generate Prisma client:
+  - Start Redis on 6379 (e.g., `brew services start redis` or `pnpm redis:start`)
   - `pnpm --filter @soup/soup-runner prisma:generate`
-  - then run `pnpm --filter @soup/soup-runner dev` after unsetting `SOUP_BOOTSTRAP` or use `start` from dist.
+  - Then run `pnpm --filter @soup/soup-runner dev` after unsetting `SOUP_BOOTSTRAP` or use `start` from dist.
 
 ## Quickstart
 
@@ -83,8 +84,7 @@ Notes:
 
 3. Full run (agents + jobs)
 
-- Start Redis (6379): `pnpm redis:up` (or `cd infra && docker compose up -d`)
-  - Ensure Docker is running (Docker Desktop/Colima/Podman machine). If Docker isn’t available, try `pnpm redis:run` (uses `docker run`) or install Redis locally (e.g., `brew install redis && brew services start redis`).
+- Start Redis locally on 6379 (e.g., `brew services start redis` or `pnpm redis:start`)
 - `pnpm --filter @soup/soup-runner prisma:generate` (generate Prisma client for SQLite)
 - `pnpm --filter @soup/soup-runner dev` (ensure `SOUP_BOOTSTRAP` is not set)
 
@@ -97,7 +97,7 @@ Notes:
 - `packages/`
   - `common/`: shared types/util, metrics (Gini), seeds
   - `agents/`: SimpleAgent (temporary) + tool adapters (`browserRun`, `stringKit`, `calc`, `retrieval`). Will be refactored to LangGraph.js + LangChain.js.
-- `infra/`: `docker-compose.yml` for Redis
+- `infra/`: (legacy) Docker files; Redis is expected to run locally now
 - `docs/`: spec and tickets (`tech-spec.md`, `tickets.md`)
 - `seeds/`: archetypes for initial agent population
 

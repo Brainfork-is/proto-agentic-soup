@@ -5,7 +5,7 @@
 - Monorepo managed by `pnpm` workspaces. Key folders:
   - `apps/`: runnable services — `browser-gateway` (Playwright gateway), `site-kb` (static KB), `soup-runner` (agents + jobs + Prisma).
   - `packages/`: shared libraries — `common`, `agents`.
-  - `infra/`: Docker and ops; `docker-compose.yml` starts Redis.
+  - `infra/`: Ops and utilities (historical). Redis is expected to run locally.
   - `docs/`: specs and tickets; `seeds/`: data archetypes.
 - Source lives under `src/`; builds output to `dist/` (entrypoints like `src/main.ts`).
 
@@ -19,7 +19,7 @@
   - `pnpm test`: workspace test hook (no tests yet).
 - Data & services:
   - `pnpm prisma:generate` / `pnpm prisma:migrate` (scoped to `apps/soup-runner`).
-  - `cd infra && docker compose up -d` to start Redis (localhost:6379).
+  - Start Redis locally on `localhost:6379` (e.g., `brew services start redis` or `redis-server --daemonize yes`).
 
 ## Coding Style & Naming Conventions
 

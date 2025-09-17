@@ -1070,7 +1070,18 @@ async function startAgentWorkers() {
   const bps = await prisma.blueprint.findMany();
   log(`[workers] Found ${agents.length} alive agents and ${bps.length} blueprints`);
 
-  for (const s of agents) {
+  const TEST_TOOL_BUILDER_ONLY = process.env.TEST_TOOL_BUILDER_ONLY === '1';
+  const filtered = TEST_TOOL_BUILDER_ONLY
+    ? agents.filter((s: any) => {
+        const bp = bps.find((b: any) => b.id === s.blueprintId);
+        return bp?.archetype === 'tool-builder';
+      })
+    : agents;
+  if (TEST_TOOL_BUILDER_ONLY) {
+    log(`[workers] TEST_TOOL_BUILDER_ONLY=1 → filtering to ${filtered.length} tool-builder agents`);
+  }
+
+  for (const s of filtered) {
     const bp = bps.find((b: any) => b.id === s.blueprintId)!;
 
     const worker = new Worker(

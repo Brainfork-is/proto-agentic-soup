@@ -24,7 +24,7 @@
 - Dev run: `pnpm dev`
 - Start from dist: `pnpm start`
 - Prisma (runner only): `pnpm prisma:generate` / `pnpm prisma:migrate`
-- Redis: `cd infra && docker compose up -d`
+- Redis: run locally on 6379 (e.g., `brew services start redis` or `pnpm redis:start`)
 
 ## Editor Setup
 

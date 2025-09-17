@@ -54,8 +54,9 @@ export class SimpleJobGenerator {
   }
 
   private async generateJobBatch(): Promise<void> {
-    // 50% chance to generate computational/tool-requiring tasks
-    const shouldGenerateComputationalTasks = Math.random() <= 0.5;
+    // 50% chance to generate computational/tool-requiring tasks (or force via env)
+    const forceComputational = process.env.JOBS_COMPUTATIONAL_ONLY === '1';
+    const shouldGenerateComputationalTasks = forceComputational ? true : Math.random() <= 0.5;
     const taskTypeInstruction = shouldGenerateComputationalTasks
       ? `\n\nCOMPUTATIONAL TASK FOCUS: Include tasks involving precise calculations, data processing, and algorithmic solutions:
 - Financial calculations (ROI, compound interest, loan payments, investment analysis with specific numbers)

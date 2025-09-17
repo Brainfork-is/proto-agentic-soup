@@ -35,7 +35,7 @@
 - `@soup/common`: types (Blueprint, AgentState, Job), metrics (Gini), util.
 - `@soup/agents`: agent loop (`plan→act→reflect→learn`), tool adapters (incl. `browserRun`).
 
-**Infra:** Redis via docker-compose; `.env` for caps (agents, jobs/min, epoch length, costs).
+**Infra:** Local Redis service (6379); `.env` for caps (agents, jobs/min, epoch length, costs).
 
 ---
 

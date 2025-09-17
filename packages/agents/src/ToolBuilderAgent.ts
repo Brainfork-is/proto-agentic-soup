@@ -51,7 +51,8 @@ function createLangChainTool(tool: any) {
           params = { input };
         }
 
-        const result = await tool.invoke(params);
+        // Execute via dynamicToolLoader to record usage metrics
+        const result = await dynamicToolLoader.executeTool(tool.name, params);
         // Ensure a string is returned
         return typeof result === 'string' ? result : JSON.stringify(result);
       } catch (error) {
@@ -88,6 +89,7 @@ export class ToolBuilderAgent {
 
       // Create agent-specific code generator tool with bound agent ID
       const agentSpecificCodeGenerator = this.createAgentSpecificCodeGenerator();
+      // Only include the code generator by default; no general-purpose tools
       this.availableTools = [agentSpecificCodeGenerator];
 
       // Load existing tools for this agent
@@ -106,8 +108,9 @@ export class ToolBuilderAgent {
       });
 
       const registryStats = dynamicToolLoader.getRegistryStats();
+      const availableNames = this.availableTools.map((t: any) => t.name).join(', ');
       log(
-        `[ToolBuilderAgent] Initialized agent ${this.id} with ${this.availableTools.length} tools (${registryStats.totalTools} from registry)`
+        `[ToolBuilderAgent] Initialized agent ${this.id} with ${this.availableTools.length} tools (${registryStats.totalTools} from registry). Tools: ${availableNames}`
       );
     } catch (error) {
       const errorMsg =
@@ -157,17 +160,20 @@ Use code_generator with:
 }
 
 EXECUTION CONSTRAINTS:
+- STRICT MODE: You MUST use tools to produce your final answer.
+- If an appropriate tool does not exist, you MUST create one via code_generator and then execute it.
+- Do NOT provide a direct LLM-only answer under any circumstance.
+- If after attempting tool creation you cannot execute a tool to complete the task, explicitly fail.
 - This is a ONE-SHOT task - you cannot ask for clarification
 - Work with the information provided in the prompt
 - Make reasonable assumptions if details seem incomplete
 - Always provide complete responses
-- If tool creation fails, continue with existing tools
 
 IMPORTANT GUIDELINES:
 1. Try existing tools first before creating new ones
 2. Only create tools when genuinely needed for the specific task
 3. Give tools descriptive, specific names
-4. If a custom tool fails during execution, the entire task fails - so be careful
+4. If a custom tool fails during execution and you cannot proceed, the entire task fails — do not answer from the LLM alone
 5. Custom tools should be focused on the specific task at hand
 
 Always provide actionable, complete responses using the best available tools.`;
@@ -247,13 +253,14 @@ Always provide actionable, complete responses using the best available tools.`;
       });
 
       // Extract the final response
-      const messages = result.messages || [];
-      const lastMessage = messages[messages.length - 1];
-      const response = lastMessage?.content || 'No response generated';
+      let messages = (result as any).messages || [];
+      let lastMessage = messages[messages.length - 1];
+      let response = lastMessage?.content || 'No response generated';
 
       // Check if new tools were created by looking for code_generator usage
       let newToolsCreated = false;
       let toolsUsed = false;
+      let usedNonGeneratorTool = false;
 
       // Helper to coerce message content to string
       const toStringContent = (content: any): string => {
@@ -301,6 +308,9 @@ Always provide actionable, complete responses using the best available tools.`;
         if (toolCalls && toolCalls.length > 0) {
           toolsUsed = true;
           for (const call of toolCalls) {
+            if (call?.name && call?.name !== 'code_generator') {
+              usedNonGeneratorTool = true;
+            }
             if (call?.name === 'code_generator') {
               try {
                 log(
@@ -367,6 +377,65 @@ Always provide actionable, complete responses using the best available tools.`;
         }
       }
 
+      // If we created new tools, perform a second pass to use them
+      if (newToolsCreated) {
+        const rerunPrompt = `${prompt}\n\n[AGENT_CONTEXT: You have just created a custom tool. Now use your available tools to fully solve the task and return the final answer.]`;
+        const second = await this.agent.invoke({
+          messages: [{ role: 'user', content: rerunPrompt }],
+        });
+        const secondMessages = (second as any).messages || [];
+        if (secondMessages.length > 0) {
+          messages = [...messages, ...secondMessages];
+          lastMessage = secondMessages[secondMessages.length - 1];
+          response = lastMessage?.content || response;
+        }
+      }
+
+      // If we created new tools, perform a second pass to use them
+      if (newToolsCreated) {
+        const rerunPrompt = `${prompt}\n\n[AGENT_CONTEXT: You have just created a custom tool. Now use your available tools to fully solve the task and return the final answer.]`;
+        const second = await this.agent.invoke({
+          messages: [{ role: 'user', content: rerunPrompt }],
+        });
+        const secondMessages = (second as any).messages || [];
+        if (secondMessages.length > 0) {
+          messages = [...messages, ...secondMessages];
+          lastMessage = secondMessages[secondMessages.length - 1];
+          response = lastMessage?.content || response;
+        }
+
+        // Track tool usage in second pass as well
+        for (const msg of secondMessages) {
+          const toolCalls =
+            (msg as any).tool_calls || (msg as any).additional_kwargs?.tool_calls || [];
+          if (toolCalls && toolCalls.length > 0) {
+            toolsUsed = true;
+            for (const call of toolCalls) {
+              if (call?.name && call?.name !== 'code_generator') {
+                usedNonGeneratorTool = true;
+              }
+            }
+          }
+        }
+      }
+
+      // Enforce strict mode: must use at least one non-code_generator tool
+      if (!usedNonGeneratorTool) {
+        log(
+          `[ToolBuilderAgent] Strict mode: no non-code_generator tool usage detected. Marking job as failed.`
+        );
+        return {
+          ok: false,
+          artifact:
+            'Strict mode: tool-builder must create and/or use tools. No non-code_generator tool usage detected.',
+          stepsUsed: messages.length,
+          archetype: this.archetype,
+          toolsUsed,
+          newToolsCreated,
+          totalToolsAvailable: this.availableTools.length,
+        };
+      }
+
       log(
         `[ToolBuilderAgent] Agent ${this.id} completed job (tools used: ${toolsUsed}, new tools created: ${newToolsCreated})`
       );
@@ -408,6 +477,7 @@ Always provide actionable, complete responses using the best available tools.`;
       // Convert to LangChain format and add to code generator
       const newLangChainTools = loadedTools.map((tool) => createLangChainTool(tool));
       const agentSpecificCodeGenerator = this.createAgentSpecificCodeGenerator();
+      // Only include code generator + dynamically loaded custom tools
       this.availableTools = [agentSpecificCodeGenerator, ...newLangChainTools];
 
       // Recreate agent with updated tools

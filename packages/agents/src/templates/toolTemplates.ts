@@ -34,14 +34,20 @@ export const {{TOOL_NAME}} = {
         processedAt: new Date().toISOString()
       });
     } catch (error) {
+      const errMsg = (error && typeof error === 'object' && 'message' in (error as any))
+        ? (error as any).message
+        : 'Tool execution failed';
       return JSON.stringify({
         success: false,
-        error: error.message,
+        error: errMsg,
         toolName: '{{TOOL_NAME}}'
       });
     }
   }
-};`,
+};
+
+// CommonJS export for runtime loader compatibility
+module.exports = {{TOOL_NAME}};`,
     placeholders: [
       'TOOL_NAME',
       'DESCRIPTION',
@@ -72,14 +78,20 @@ export const {{TOOL_NAME}} = {
         computedAt: new Date().toISOString()
       });
     } catch (error) {
+      const errMsg = (error && typeof error === 'object' && 'message' in (error as any))
+        ? (error as any).message
+        : 'Tool execution failed';
       return JSON.stringify({
         success: false,
-        error: error.message,
+        error: errMsg,
         toolName: '{{TOOL_NAME}}'
       });
     }
   }
-};`,
+};
+
+// CommonJS export for runtime loader compatibility
+module.exports = {{TOOL_NAME}};`,
     placeholders: [
       'TOOL_NAME',
       'DESCRIPTION',
@@ -115,14 +127,20 @@ export const {{TOOL_NAME}} = {
         analyzedAt: new Date().toISOString()
       });
     } catch (error) {
+      const errMsg = (error && typeof error === 'object' && 'message' in (error as any))
+        ? (error as any).message
+        : 'Tool execution failed';
       return JSON.stringify({
         success: false,
-        error: error.message,
+        error: errMsg,
         toolName: '{{TOOL_NAME}}'
       });
     }
   }
-};`,
+};
+
+// CommonJS export for runtime loader compatibility
+module.exports = {{TOOL_NAME}};`,
     placeholders: ['TOOL_NAME', 'DESCRIPTION', 'OTHER_PARAMS', 'ANALYSIS_CODE', 'ANALYSIS_TYPE'],
   },
 
@@ -151,14 +169,20 @@ export const {{TOOL_NAME}} = {
         validatedAt: new Date().toISOString()
       });
     } catch (error) {
+      const errMsg = (error && typeof error === 'object' && 'message' in (error as any))
+        ? (error as any).message
+        : 'Tool execution failed';
       return JSON.stringify({
         success: false,
-        error: error.message,
+        error: errMsg,
         toolName: '{{TOOL_NAME}}'
       });
     }
   }
-};`,
+};
+
+// CommonJS export for runtime loader compatibility
+module.exports = {{TOOL_NAME}};`,
     placeholders: ['TOOL_NAME', 'DESCRIPTION', 'VALIDATION_PARAMS', 'VALIDATION_RULES'],
   },
 
@@ -191,7 +215,10 @@ export const {{TOOL_NAME}} = {
       });
     }
   }
-};`,
+};
+
+// CommonJS export for runtime loader compatibility
+module.exports = {{TOOL_NAME}};`,
     placeholders: ['TOOL_NAME', 'DESCRIPTION', 'FORMAT_PARAMS', 'FORMATTING_CODE', 'FORMAT_TYPE'],
   },
 };

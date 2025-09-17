@@ -164,7 +164,7 @@ To restore from this backup:
 
 3. **Restart Services:**
    \`\`\`bash
-   pnpm redis:up
+   pnpm redis:start
    pnpm dev
    \`\`\`
 

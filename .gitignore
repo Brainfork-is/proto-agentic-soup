@@ -1,3 +1,4 @@
+runs/
 backups/
 packages/agents/src/generated-tools/
 # Node & pnpm

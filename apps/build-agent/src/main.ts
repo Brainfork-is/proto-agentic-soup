@@ -72,7 +72,7 @@ function generatePrompt(ticket: Ticket, concept: string, spec: string): string {
   ];
   const repoTips = [
     'Root scripts: pnpm dev | pnpm build | pnpm start | pnpm test.',
-    'Redis: cd infra && docker compose up -d.',
+    'Redis: run locally on 6379 (e.g., brew services start redis or pnpm redis:start).',
     'Prisma (runner): pnpm prisma:generate | pnpm prisma:migrate.',
     'Apps: browser-gateway, site-kb, soup-runner. Packages: common, agents.',
   ];

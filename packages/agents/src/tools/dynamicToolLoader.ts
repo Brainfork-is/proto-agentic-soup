@@ -58,6 +58,11 @@ export class DynamicToolLoader {
       // Load manifests
       await this.loadAllManifests();
 
+      const shareMode = (process.env.TOOL_LOADER_SHARE_MODE || 'smart').toLowerCase();
+      const recentHours = parseInt(process.env.TOOL_LOADER_RECENT_HOURS || '48', 10);
+      const maxTools = parseInt(process.env.TOOL_LOADER_MAX_TOOLS || '50', 10);
+      const now = Date.now();
+
       // Find tools created by this agent or high-success tools from others
       const availableTools: LoadedTool[] = [];
       let ownToolsCount = 0;
@@ -70,13 +75,32 @@ export class DynamicToolLoader {
           const isSharedTool =
             !isOwnTool &&
             manifest.usageCount >= 5 &&
-            manifest.successCount / manifest.usageCount > 0.7;
-          const shouldLoad = isOwnTool || isSharedTool;
+            manifest.successCount / Math.max(1, manifest.usageCount) > 0.7;
+          const createdAtMs = Date.parse(manifest.createdAt || '');
+          const isRecent =
+            !Number.isNaN(createdAtMs) && now - createdAtMs <= recentHours * 3600 * 1000;
+
+          let shouldLoad = false;
+          switch (shareMode) {
+            case 'all':
+              shouldLoad = true;
+              break;
+            case 'recent':
+              shouldLoad = isOwnTool || isRecent;
+              break;
+            case 'smart':
+            default:
+              // Original behavior plus allow recent tools to encourage reuse across agents
+              shouldLoad = isOwnTool || isSharedTool || isRecent;
+              break;
+          }
 
           if (shouldLoad) {
             const reason = isOwnTool
               ? 'own tool'
-              : `shared tool (${manifest.successCount}/${manifest.usageCount} success rate)`;
+              : isRecent
+                ? `recent tool (created ${manifest.createdAt})`
+                : `shared tool (${manifest.successCount}/${manifest.usageCount} success rate)`;
             log(`[DynamicToolLoader] Loading ${manifest.toolName} for agent ${agentId}: ${reason}`);
 
             const tool = await this.loadSingleTool(toolName, manifest);
@@ -85,6 +109,11 @@ export class DynamicToolLoader {
               if (isOwnTool) ownToolsCount++;
               else sharedToolsCount++;
             }
+          }
+
+          // Respect tool cap to avoid bloating the agent
+          if (availableTools.length >= maxTools) {
+            break;
           }
         } catch (error) {
           logError(`[DynamicToolLoader] Failed to load tool ${toolName}:`, error);
@@ -248,9 +277,25 @@ export class DynamicToolLoader {
     manifest: ToolManifest
   ): Promise<LoadedTool | null> {
     try {
+      // Transform potential ESM syntax to CommonJS for runtime import
+      const toCommonJS = (src: string): string => {
+        let out = src;
+        // Replace `export const name =` with `const name =`
+        out = out.replace(/\bexport\s+const\s+(\w+)\s*=/g, 'const $1 =');
+        out = out.replace(/\bexport\s+let\s+(\w+)\s*=/g, 'let $1 =');
+        out = out.replace(/\bexport\s+var\s+(\w+)\s*=/g, 'var $1 =');
+        // Replace `export default <expr>;` with `module.exports = <expr>;`
+        out = out.replace(/\bexport\s+default\s+/g, 'module.exports = ');
+        // Remove named export lists like `export { a, b as c };`
+        out = out.replace(/\bexport\s*\{[^}]*\};?/g, '');
+        return out;
+      };
+
+      const sanitizedCode = toCommonJS(code);
+
       // Create a safe module environment
       const moduleCode = `
-        ${code}
+        ${sanitizedCode}
         
         // Export the tool
         if (typeof ${manifest.toolName} !== 'undefined') {
