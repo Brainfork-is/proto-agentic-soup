@@ -40,101 +40,63 @@ export class JobGenerator {
 
   constructor() {
     this.templates = {
-      web_research: `Generate a professional research question that can be answered using web research and business knowledge.
+      generic: `You are a task generator creating realistic work assignments that people might give to an AI assistant. Create diverse, professional tasks that vary in type and complexity.
 
-Create realistic business questions that professionals would research in a corporate environment. Topics can include:
-- Technology implementation and best practices (cloud migration, cybersecurity, DevOps)
-- Market trends and competitive analysis (industry insights, emerging technologies)
-- Operational efficiency and process improvement (automation, workflows, cost reduction)
-- Regulatory compliance and risk management (GDPR, SOX, industry regulations)
-- Team management and organizational development (remote work, performance metrics)
-- Financial planning and cost optimization (budget allocation, ROI analysis)
-- Customer acquisition and retention strategies (CRM, customer experience)
-- Digital transformation initiatives (modernization, integration strategies)
-- Product development and innovation (roadmaps, user research, market fit)
-- Supply chain and logistics optimization
-- Data analytics and business intelligence
-- Change management and organizational culture
+Generate ONE of these four types of tasks randomly:
 
-Questions should be specific, actionable, and relevant to corporate decision-making. The agent will use the available knowledge base pages and LLM capabilities to research and answer.
+1. RESEARCH TASK - Professional research questions for business/technical domains:
+   Examples: "What are the current best practices for implementing zero-trust security architecture?", "How can small businesses leverage AI for customer service automation?", "What are the key regulatory considerations for cloud data storage in healthcare?"
 
-Respond with JSON:
-{
-  "url": "http://localhost:4200/",
-  "question": "Your professional research question here"
-}`,
+2. SUMMARIZATION TASK - Real content that needs condensing:
+   Examples: Technical documentation, meeting notes, research findings, policy documents, product reviews, news articles
 
-      summarize: `Generate a text summarization task with realistic content.
+3. CLASSIFICATION TASK - Realistic content categorization:
+   Examples: Customer feedback sentiment, document types, support ticket priorities, expense categories, content moderation
 
-Create diverse text snippets about technology, AI, databases, or related topics. Vary the word limits and complexity.
+4. CALCULATION TASK - Business math problems:
+   Examples: Budget calculations, ROI analysis, cost projections, percentage changes, financial metrics
 
-Respond with JSON:
-{
-  "text": "Text to summarize (2-4 sentences)",
-  "maxWords": number between 8-20
-}`,
+Make tasks specific and professional - the kind of work people actually delegate to assistants. Avoid generic or academic examples.
 
-      classify: `Generate a text classification task with realistic content and labels.
+Based on the task type you choose, respond with the appropriate JSON format:
 
-Create text snippets that need categorization. Use varied domains like technology, business, science, etc.
+FOR RESEARCH: {"url": "http://localhost:4200/", "question": "specific research question"}
+FOR SUMMARIZATION: {"text": "realistic content to summarize (2-4 sentences)", "maxWords": number between 8-20}
+FOR CLASSIFICATION: {"text": "content to classify", "labels": ["option1", "option2", "option3"], "answer": "correct_option"}
+FOR CALCULATION: {"expr": "mathematical expression using +, -, *, /, parentheses only"}
 
-Respond with JSON:
-{
-  "text": "Text to classify",
-  "labels": ["Label1", "Label2", "Label3"],
-  "answer": "CorrectLabel"
-}`,
-
-      math: `Generate a mathematical expression for evaluation.
-
-Create varied math problems with different operations and complexity levels. 
-Use ONLY these operations: + (add), - (subtract), * (multiply), / (divide), parentheses for grouping.
-DO NOT use exponentiation (^), modulo (%), or any other operations.
-Numbers can be integers or decimals.
-
-Respond with JSON:
-{
-  "expr": "mathematical expression"
-}
-
-Example: {"expr": "2 + 3 * (4 - 1) / 2"}`,
+Choose ONE type and generate realistic, professional content for it.`,
     };
   }
 
   async generateJob(): Promise<GeneratedJob> {
-    const categories = ['web_research', 'summarize', 'classify', 'math'] as const;
-    const category = categories[Math.floor(Math.random() * categories.length)];
-
-    // LLM generation only - no fallback
-    const llmJob = await this.generateLLMJob(category);
+    // LLM generation only - no fallback, let LLM choose the category
+    const llmJob = await this.generateLLMJob();
     if (!llmJob) {
-      throw new Error(`Failed to generate ${category} job with LLM`);
+      throw new Error(`Failed to generate job with LLM`);
     }
 
     return llmJob;
   }
 
-  private async generateLLMJob(category: string): Promise<GeneratedJob | null> {
-    const prompt = `${this.templates[category]}
+  private async generateLLMJob(): Promise<GeneratedJob | null> {
+    const prompt = `${this.templates.generic}
 
 Make the content interesting and varied. Avoid repetition from previous generations.`;
 
-    console.log(`[JobGenerator] Requesting ${category} job from Vertex AI...`);
+    console.log(`[JobGenerator] Requesting realistic job from Vertex AI...`);
 
     // Use PatchedChatVertexAI directly (same config as LangGraphAgent)
     const llm = this.createVertexAILLM();
     const response = await llm.invoke(prompt);
 
     if (!response || !response.content) {
-      console.error(`[JobGenerator] Vertex AI returned null response for ${category}`);
+      console.error(`[JobGenerator] Vertex AI returned null response`);
       return null;
     }
 
     const content = response.content as string;
-    console.log(
-      `[JobGenerator] Vertex AI response for ${category}:`,
-      content.substring(0, 200) + '...'
-    );
+    console.log(`[JobGenerator] Vertex AI response:`, content.substring(0, 200) + '...');
 
     try {
       // Extract JSON from response - find first complete JSON object
@@ -158,19 +120,28 @@ Make the content interesting and varied. Avoid repetition from previous generati
 
       if (jsonStart === -1 || jsonEnd === -1) {
         console.error(
-          `[JobGenerator] No valid JSON found in Vertex AI response for ${category}. Full response:`,
+          `[JobGenerator] No valid JSON found in Vertex AI response. Full response:`,
           content
         );
         throw new Error('No complete JSON found in response');
       }
 
       const jsonStr = content.substring(jsonStart, jsonEnd + 1);
-      console.log(`[JobGenerator] Extracted JSON string for ${category}:`, jsonStr);
+      console.log(`[JobGenerator] Extracted JSON string:`, jsonStr);
 
       const payload = JSON.parse(jsonStr);
-      console.log(`[JobGenerator] Parsed ${category} payload:`, JSON.stringify(payload));
+      console.log(`[JobGenerator] Parsed payload:`, JSON.stringify(payload));
 
-      // Validate payload based on category
+      // Determine category from payload structure
+      const category = this.detectCategory(payload);
+      if (!category) {
+        console.error(`[JobGenerator] Could not determine category from payload structure`);
+        console.error(`[JobGenerator] Received payload:`, JSON.stringify(payload, null, 2));
+        console.error(`[JobGenerator] Full Vertex AI response was:`, content);
+        throw new Error('Could not determine task category from payload');
+      }
+
+      // Validate payload based on detected category
       if (!this.validatePayload(category, payload)) {
         console.error(`[JobGenerator] Validation failed for ${category}. Expected structure:`);
         this.logExpectedStructure(category);
@@ -179,6 +150,8 @@ Make the content interesting and varied. Avoid repetition from previous generati
         throw new Error('Invalid payload structure');
       }
 
+      console.log(`[JobGenerator] Generated realistic ${category} job`);
+
       return {
         category: category as GeneratedJob['category'],
         payload,
@@ -186,10 +159,27 @@ Make the content interesting and varied. Avoid repetition from previous generati
         deadlineS: 60,
       };
     } catch (error) {
-      console.error(`[JobGenerator] Failed to parse LLM response for ${category}:`, error);
+      console.error(`[JobGenerator] Failed to parse LLM response:`, error);
       console.error(`[JobGenerator] Error details:`, (error as Error).message);
       return null;
     }
+  }
+
+  private detectCategory(payload: any): string | null {
+    // Detect category based on payload structure
+    if (payload.url && payload.question) {
+      return 'web_research';
+    }
+    if (payload.text && payload.maxWords !== undefined) {
+      return 'summarize';
+    }
+    if (payload.text && payload.labels && payload.answer) {
+      return 'classify';
+    }
+    if (payload.expr) {
+      return 'math';
+    }
+    return null;
   }
 
   private logExpectedStructure(category: string): void {

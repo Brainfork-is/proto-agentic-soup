@@ -72,63 +72,70 @@ export class SimpleJobGenerator {
 Focus on tasks with specific numerical inputs and expected precise outputs.`
       : `\n\nGENERAL TASK VARIETY: Include research, writing, analysis, and planning tasks that may benefit from tool usage for data gathering and verification.`;
 
-    const prompt = `Generate exactly 10 diverse, actionable tasks that AI agents can complete immediately. Return them in JSON format.${taskTypeInstruction}
+    const prompt = `Generate exactly 10 realistic work assignments that people would actually delegate to a professional AI assistant. Return them in JSON format.${taskTypeInstruction}
 
-VARIETY REQUIREMENTS:
-- Mix different industries: technology, healthcare, education, finance, retail, entertainment, travel, food, manufacturing, real estate, sports, arts, etc.
-- Mix task types: research, writing, analysis, planning, creative, problem-solving, comparison, explanation, instruction, design, etc.
-- Vary complexity and length requirements (from simple lists to detailed guides)
-- Include both business and personal use cases
-- Generate completely unique tasks - NO repetition of previous patterns
+REALISM REQUIREMENTS:
+Create tasks that mirror real professional work scenarios - the kind of assignments managers, executives, entrepreneurs, researchers, and consultants actually delegate to assistants. These should feel like genuine workplace requests.
 
-TASK CATEGORIES TO EXPLORE (create diverse tasks across these domains):
-- Mathematical Calculations: compound interest, loan payments, ROI calculations, statistical analysis
-- Data Processing: sorting algorithms, data validation, format conversion, parsing tools
-- Financial Tools: investment calculators, tax calculators, budget planners, pricing models
-- Scientific Computing: physics calculations, chemistry formulas, engineering computations
-- Text Processing: pattern matching, string manipulation, format validation, parsing tools
-- Time & Date: scheduling algorithms, time zone conversions, duration calculations
-- Business Logic: discount calculators, inventory management, sales commission tools
-- Algorithm Implementation: search algorithms, optimization problems, data structures
-- Validation Systems: input validation, data verification, format checking tools
-- Unit Conversion: measurement conversions, currency calculations, scale transformations
-- Business Strategy: planning, analysis, process improvement
-- Content Creation: writing, design, marketing materials  
-- Education: explanations, tutorials, learning guides
-- Technology: comparisons, setup guides, troubleshooting
-- Health & Wellness: routines, advice, explanations
-- Travel & Lifestyle: planning, recommendations, comparisons
-- Creative Projects: brainstorming, design, ideation
-- Problem Solving: troubleshooting, optimization, solutions
-- Research & Analysis: investigation, comparison, evaluation
+PROFESSIONAL DOMAINS TO DRAW FROM:
+- Business Strategy & Analysis: Market research, competitive analysis, feasibility studies, business plan sections
+- Financial Analysis: Investment research, cost-benefit analysis, budget planning, financial modeling
+- Marketing & Sales: Campaign planning, content strategy, lead generation research, customer segmentation
+- Operations & Project Management: Process optimization, vendor research, project planning, workflow design
+- Technology & Engineering: Technical documentation, system comparisons, implementation planning, troubleshooting guides
+- Legal & Compliance: Regulatory research, policy analysis, compliance checklists, contract summaries
+- Human Resources: Recruitment planning, training program design, policy development, performance metrics
+- Product Development: Feature analysis, user research synthesis, roadmap planning, competitive feature comparison
+- Real Estate & Property: Market analysis, investment evaluation, property research, development planning
+- Healthcare & Pharmaceuticals: Research synthesis, regulatory analysis, market assessment, protocol development
+- Education & Training: Curriculum development, learning assessment, educational research, training materials
+- Consulting & Advisory: Industry analysis, recommendation frameworks, client deliverables, strategic planning
+
+TASK TYPES THAT REFLECT REAL WORK:
+- Research & Intelligence: "Research the top 5 competitors to Slack in the enterprise messaging space and analyze their pricing models"
+- Analysis & Recommendations: "Analyze our Q3 customer churn data and identify the top 3 factors contributing to cancellations"
+- Planning & Strategy: "Create a 90-day go-to-market strategy for launching our new mobile app in the European market"
+- Content & Communication: "Draft a comprehensive onboarding guide for new remote employees joining our engineering team"
+- Process & Operations: "Design a workflow for handling customer escalations that reduces response time by 50%"
+- Financial & Business: "Calculate the ROI of implementing a new CRM system for our 200-person sales team"
+- Technical & Implementation: "Create a migration plan for moving our customer database from MySQL to PostgreSQL"
+
+REALISM & AUTHENTICITY GUIDELINES:
+- Frame tasks as actual workplace assignments ("We need you to..." / "Please research..." / "Help us understand...")
+- Use real company names, products, and industry terms that professionals would recognize
+- Include realistic constraints and parameters (budgets, timelines, team sizes, specific requirements)
+- Reference actual tools, platforms, and methodologies used in business
+- Make tasks feel urgent and important, like real business priorities
+
+PROFESSIONAL LANGUAGE PATTERNS:
+- "Conduct a comprehensive analysis of..."
+- "Research and recommend the best..."
+- "Develop a strategic plan for..."
+- "Create a detailed comparison of..."
+- "Analyze the market opportunity for..."
+- "Design an implementation roadmap for..."
+- "Evaluate the feasibility of..."
+- "Prepare a business case for..."
 
 SPECIFICITY REQUIREMENTS:
-- Use actual, real-world named entities and brands that exist
-- Include concrete dates, timeframes, and specific numbers
-- Reference specific products, services, or organizations by their actual names
-- When asking for analysis, specify exact metrics and criteria to evaluate
-- Make all references searchable and verifiable through web search
+- Include actual company names, product names, and industry terminology
+- Specify realistic budgets, team sizes, timelines, and metrics
+- Reference real tools and platforms (Salesforce, HubSpot, AWS, Slack, etc.)
+- Include concrete business scenarios and challenges
+- Make all context feel authentic to actual business operations
 
-FORBIDDEN PATTERNS - Never use vague references:
-- NO: "a popular..." / "a new..." / "a recent..." / "a leading..." / "a major..."
-- NO: "a company" / "a product" / "a service" / "an organization" 
-- NO: "recently" / "lately" / "in recent months" / "current"
-- NO: "provided data" / "given dataset" / "attached information"
-- INSTEAD: Use specific names, exact dates, and include all needed data inline
+FORBIDDEN GENERIC PATTERNS:
+- Avoid academic or theoretical assignments
+- No hypothetical or made-up scenarios
+- Don't use placeholder names (Company X, Product Y)
+- Avoid overly simplified tasks that don't reflect real work complexity
+- Skip tasks that sound like textbook exercises
 
-DATA COMPLETENESS RULES:
-- Every task must be fully self-contained with ALL necessary information
-- If the task involves analyzing data, generate and include the actual data points in the prompt
-- Never reference external, attached, or provided materials that don't exist
-- Include all numbers, statistics, or data points needed within the task description
-- Format any data clearly within the prompt itself (e.g., "Analyze these Q3 2024 sales figures: Product A: $45K, Product B: $72K...")
-
-REQUIREMENTS FOR EACH TASK:
-- Completely self-contained (no placeholders or external references)
-- Specific deliverable requested
-- Achievable by AI with current tools
-- Clear scope and requirements
-- Use real entity names, not generic descriptions
+TASK COMPLETENESS:
+- Every task should be fully self-contained with clear deliverables
+- Include all necessary context and constraints within the prompt
+- Specify the format and scope of expected outputs
+- Make tasks achievable with available tools and research capabilities
 
 CRITICAL: Respond with ONLY valid JSON in this exact format (ensure all strings are properly quoted):
 {
