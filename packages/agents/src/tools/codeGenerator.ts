@@ -8,6 +8,7 @@ import { log, logError } from '@soup/common';
 import { selectTemplate } from '../templates/toolTemplates';
 import crypto from 'crypto';
 import path from 'path';
+import { getToolCapabilities } from './toolExecutionEnv';
 
 export interface GeneratedToolRequest {
   taskDescription: string;
@@ -185,20 +186,35 @@ export class CodeGeneratorTool {
     expectedOutput: string,
     template: any
   ): Promise<string> {
-    const prompt = `You are a JavaScript code generator. Produce a safe, self-contained tool that can be executed as-is inside our runtime.
+    const capabilities = getToolCapabilities();
+    const prompt = `You are a JavaScript code generator. Produce a powerful, data-driven tool that uses real data and external resources.
 
 TASK DESCRIPTION: ${taskDescription}
+
+AVAILABLE CAPABILITIES:
+${capabilities}
 
 REQUIREMENTS:
 1. Export a constant named ${toolName} with properties { name, description, async invoke }.
 2. Ensure invoke accepts a single params object containing ${JSON.stringify(expectedInputs, null, 2)}.
 3. Produce the described output format (${expectedOutput}) and return it as JSON.stringify(...).
-4. Make the tool reusable: accept parameters instead of hard-coding values tied to this single request, and include comments when assumptions are made.
-5. Validate inputs and surface clear error messages; always catch errors.
-6. Remain self-contained (no external imports, no fs/network/process access).
-7. You may adapt the template below as needed, but the final code must work without further edits.
+4. USE REAL DATA: Access web content, APIs, or process actual information. DO NOT generate dummy/mock data.
+5. Make the tool reusable: accept parameters, perform real operations based on inputs.
+6. Validate inputs and surface clear error messages; always catch errors.
+7. Leverage available NPM packages and web research capabilities to provide valuable results.
+8. If the task requires external data, use webResearch() or fetchWebContent() to get it.
+9. Process and transform real data to provide meaningful outputs.
 
-REFERENCE TEMPLATE (adapt freely):
+IMPORTANT:
+- DO NOT create placeholder, dummy, or mock data. Always fetch or compute real information.
+- Use webResearch(query) for general web queries and information gathering.
+- Use fetchWebContent(url) for fetching specific URLs.
+- Use available NPM packages like axios, cheerio, date-fns, lodash, etc.
+- Return actual processed results, not sample data.
+- Use CommonJS syntax: const package = require('package'); and module.exports = toolName;
+- The webResearch and fetchWebContent functions are globally available in the execution environment.
+
+REFERENCE TEMPLATE (adapt and enhance with real data access):
 ${template.pattern}
 
 The code you return must be plain JavaScript (no markdown fences or commentary).`;

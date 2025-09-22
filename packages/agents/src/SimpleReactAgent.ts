@@ -239,7 +239,7 @@ export function createAgentForBlueprint(
   archetype: string
 ): SimpleReactAgent | any {
   // Import ToolBuilderAgent here to avoid circular dependencies
-  // eslint-disable-next-line @typescript-eslint/no-var-requires, no-undef
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const ToolBuilderAgent = require('./ToolBuilderAgent').ToolBuilderAgent;
 
   // Validate archetype is one of our supported types

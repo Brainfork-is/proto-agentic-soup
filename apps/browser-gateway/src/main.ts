@@ -19,7 +19,6 @@ app.post('/run', async (req, reply) => {
   const steps: any[] = b.steps || [];
 
   try {
-    // eslint-disable-next-line no-undef
     const u = new URL(url);
     const hostname = u.hostname;
 

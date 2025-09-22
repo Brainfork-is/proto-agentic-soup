@@ -11,13 +11,13 @@ import path from 'path';
 import fs from 'fs-extra';
 function log(message: string, ...args: any[]): void {
   const timestamp = new Date().toISOString();
-   
+
   console.log(`[${timestamp}] ${message}`, ...args);
 }
 
 function logError(message: string, ...args: any[]): void {
   const timestamp = new Date().toISOString();
-   
+
   console.error(`[${timestamp}] ${message}`, ...args);
 }
 
@@ -106,7 +106,7 @@ async function run(): Promise<void> {
   // Load CJS module via createRequire
   const { createRequire } = await import('module');
   const req = createRequire(__filename);
-   
+
   const toolModule = req(tempFile);
   const toolInstance = (toolModule as any).default || toolModule;
   if (!toolInstance || typeof toolInstance.invoke !== 'function') {

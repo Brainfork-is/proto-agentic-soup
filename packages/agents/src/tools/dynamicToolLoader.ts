@@ -6,6 +6,7 @@ import { log, logError } from '@soup/common';
 import path from 'path';
 import fs from 'fs-extra';
 import crypto from 'crypto';
+import { executeToolInSandbox, validateToolCode } from './toolExecutionEnv';
 
 interface ToolManifest {
   toolName: string;
@@ -59,52 +60,29 @@ export class DynamicToolLoader {
       // Load manifests
       await this.loadAllManifests();
 
-      const shareMode = (process.env.TOOL_LOADER_SHARE_MODE || 'smart').toLowerCase();
-      const recentHours = parseInt(process.env.TOOL_LOADER_RECENT_HOURS || '48', 10);
+      // Note: shareMode, recentHours, and timing variables removed for mutation model
       const maxTools = parseInt(process.env.TOOL_LOADER_MAX_TOOLS || '50', 10);
-      const now = Date.now();
 
-      // Find tools created by this agent or high-success tools from others
+      // MUTATION MODEL: Only load tools created by this specific agent
+      // Tools represent mutations and should not be shared between agents
       const availableTools: LoadedTool[] = [];
       let ownToolsCount = 0;
-      let sharedToolsCount = 0;
 
       const seenToolNames = new Set<string>();
 
       for (const [toolName, manifest] of this.manifestCache) {
         try {
-          // Load tools created by this agent, or successful tools from others
+          // Only load tools created by this agent (no sharing)
           const isOwnTool = manifest.createdBy === agentId;
-          const isSharedTool =
-            !isOwnTool &&
-            manifest.usageCount >= 5 &&
-            manifest.successCount / Math.max(1, manifest.usageCount) > 0.7;
-          const createdAtMs = Date.parse(manifest.createdAt || '');
-          const isRecent =
-            !Number.isNaN(createdAtMs) && now - createdAtMs <= recentHours * 3600 * 1000;
 
           let shouldLoad = false;
-          switch (shareMode) {
-            case 'all':
-              shouldLoad = true;
-              break;
-            case 'recent':
-              shouldLoad = isOwnTool || isRecent;
-              break;
-            case 'smart':
-            default:
-              // Original behavior plus allow recent tools to encourage reuse across agents
-              shouldLoad = isOwnTool || isSharedTool || isRecent;
-              break;
+          if (isOwnTool) {
+            shouldLoad = true;
           }
+          // Note: Tool sharing disabled for mutation-based evolutionary model
 
           if (shouldLoad) {
-            const reason = isOwnTool
-              ? 'own tool'
-              : isRecent
-                ? `recent tool (created ${manifest.createdAt})`
-                : `shared tool (${manifest.successCount}/${manifest.usageCount} success rate)`;
-            log(`[DynamicToolLoader] Loading ${manifest.toolName} for agent ${agentId}: ${reason}`);
+            log(`[DynamicToolLoader] Loading ${manifest.toolName} for agent ${agentId}: own tool`);
 
             const tool = await this.loadSingleTool(toolName, manifest);
             if (tool) {
@@ -115,8 +93,7 @@ export class DynamicToolLoader {
               } else {
                 seenToolNames.add(tool.name);
                 availableTools.push(tool);
-                if (isOwnTool) ownToolsCount++;
-                else sharedToolsCount++;
+                ownToolsCount++;
               }
             }
           }
@@ -135,7 +112,7 @@ export class DynamicToolLoader {
       }
 
       log(
-        `[DynamicToolLoader] Loaded ${availableTools.length} tools for agent ${agentId} (${ownToolsCount} own, ${sharedToolsCount} shared)`
+        `[DynamicToolLoader] Loaded ${availableTools.length} tools for agent ${agentId} (${ownToolsCount} own, 0 shared - mutation model)`
       );
       return availableTools;
     } catch (error) {
@@ -373,16 +350,37 @@ export class DynamicToolLoader {
           throw new Error('Invalid tool structure: missing name or invoke method');
         }
 
-        // Wrap invoke method with safety checks
+        // Wrap invoke method with sandboxed execution
         const safeInvoke = async (params: any): Promise<string> => {
           try {
-            return await toolInstance.invoke(params);
+            // Validate the code first
+            const validation = validateToolCode(code);
+            if (!validation.valid) {
+              logError(
+                `[DynamicToolLoader] Tool code validation failed for ${manifest.toolName}:`,
+                validation.errors
+              );
+              // Still try to execute but log the issues
+            }
+
+            // Execute in sandbox with access to npm packages and web
+            return await executeToolInSandbox(code, manifest.toolName, params);
           } catch (error) {
-            return JSON.stringify({
-              success: false,
-              error: error instanceof Error ? error.message : 'Tool execution failed',
-              toolName: manifest.toolName,
-            });
+            logError(
+              `[DynamicToolLoader] Sandboxed execution failed for ${manifest.toolName}:`,
+              error
+            );
+            // Fallback to direct execution if sandbox fails
+            try {
+              return await toolInstance.invoke(params);
+            } catch (fallbackError) {
+              return JSON.stringify({
+                success: false,
+                error:
+                  fallbackError instanceof Error ? fallbackError.message : 'Tool execution failed',
+                toolName: manifest.toolName,
+              });
+            }
           }
         };
 

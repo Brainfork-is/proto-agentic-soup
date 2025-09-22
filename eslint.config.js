@@ -36,6 +36,13 @@ module.exports = [
         __dirname: 'readonly',
         __filename: 'readonly',
         AbortController: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+        require: 'readonly',
+        module: 'readonly',
+        exports: 'readonly',
+        fetch: 'readonly',
+        AbortSignal: 'readonly',
       },
     },
     plugins: {

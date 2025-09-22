@@ -13,21 +13,36 @@ export interface ToolTemplate {
 export const TOOL_TEMPLATES: Record<string, ToolTemplate> = {
   dataProcessor: {
     name: 'Data Processing Tool',
-    description: 'Process and transform data with custom logic',
+    description: 'Process and transform data with custom logic using real data sources',
     pattern: `
-export const {{TOOL_NAME}} = {
+// Available packages and functions:
+// const axios = require('axios').default || require('axios'); // Handle ES6 default export
+// const cheerio = require('cheerio');
+// const lodash = require('lodash');
+// const dateUtils = require('date-fns');
+// const webData = await webResearch('query');
+// const htmlContent = await fetchWebContent('url');
+// const $ = parseHTML(htmlContent);
+
+const {{TOOL_NAME}} = {
   name: '{{TOOL_NAME}}',
   description: '{{DESCRIPTION}}',
   async invoke(params) {
     try {
       const { {{INPUT_PARAMS}} } = params;
-      
+
       // Input validation
       {{VALIDATION_CODE}}
-      
-      // Processing logic
+
+      // Use real data sources - Examples:
+      // const webData = await webResearch('relevant query');
+      // const axios = require('axios').default || require('axios');
+      // const apiData = await axios.get('https://api.example.com/data');
+      // const parsedHtml = parseHTML(await fetchWebContent('https://example.com'));
+
+      // Processing logic with real data
       {{PROCESSING_CODE}}
-      
+
       const output = {
         success: true,
         {{SUCCESS_FIELDS}}
@@ -196,10 +211,10 @@ export const {{TOOL_NAME}} = {
   async invoke(params) {
     try {
       const { data, {{FORMAT_PARAMS}} } = params;
-      
+
       // Formatting logic
       {{FORMATTING_CODE}}
-      
+
       const output = {
         success: true,
         {{FORMAT_FIELDS}}
@@ -223,6 +238,63 @@ export const {{TOOL_NAME}} = {
 module.exports = {{TOOL_NAME}};`,
     placeholders: ['TOOL_NAME', 'DESCRIPTION', 'FORMAT_PARAMS', 'FORMATTING_CODE', 'FORMAT_FIELDS'],
   },
+
+  webResearcher: {
+    name: 'Web Research Tool',
+    description: 'Research and gather information from the internet',
+    pattern: `
+// Web Research Tool with internet access and npm packages
+const axios = require('axios').default || require('axios');
+const cheerio = require('cheerio');
+
+const {{TOOL_NAME}} = {
+  name: '{{TOOL_NAME}}',
+  description: '{{DESCRIPTION}}',
+  async invoke(params) {
+    try {
+      const { {{INPUT_PARAMS}} } = params;
+
+      // Input validation
+      {{VALIDATION_CODE}}
+
+      // Use axios for direct API calls or webResearch for search
+      // For direct URLs: const response = await axios.get('https://api.example.com/data');
+      // For general web search: const searchResults = await webResearch(query);
+      // For specific URL content: const webContent = await fetchWebContent('https://example.com');
+      // Note: axios might need .default: const axios = require('axios').default || require('axios');
+
+      {{RESEARCH_PROCESSING}}
+
+      const output = {
+        success: true,
+        {{RESEARCH_FIELDS}}
+      };
+
+      return JSON.stringify(output);
+    } catch (error) {
+      const errMsg = (error && typeof error === 'object' && 'message' in (error as any))
+        ? (error as any).message
+        : 'Web research failed';
+      return JSON.stringify({
+        success: false,
+        error: errMsg,
+        toolName: '{{TOOL_NAME}}'
+      });
+    }
+  }
+};
+
+// CommonJS export for runtime loader compatibility
+module.exports = {{TOOL_NAME}};`,
+    placeholders: [
+      'TOOL_NAME',
+      'DESCRIPTION',
+      'INPUT_PARAMS',
+      'VALIDATION_CODE',
+      'RESEARCH_PROCESSING',
+      'RESEARCH_FIELDS',
+    ],
+  },
 };
 
 /**
@@ -230,6 +302,23 @@ module.exports = {{TOOL_NAME}};`,
  */
 export function selectTemplate(taskDescription: string): ToolTemplate {
   const desc = taskDescription.toLowerCase();
+
+  if (
+    desc.includes('research') ||
+    desc.includes('search') ||
+    desc.includes('web') ||
+    desc.includes('internet') ||
+    desc.includes('fetch') ||
+    desc.includes('crawl') ||
+    desc.includes('scrape') ||
+    desc.includes('url') ||
+    desc.includes('website') ||
+    desc.includes('news') ||
+    desc.includes('latest') ||
+    desc.includes('current')
+  ) {
+    return TOOL_TEMPLATES.webResearcher;
+  }
 
   if (desc.includes('calculat') || desc.includes('math') || desc.includes('compute')) {
     return TOOL_TEMPLATES.calculator;

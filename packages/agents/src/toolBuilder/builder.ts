@@ -105,9 +105,20 @@ export async function builderPlan(
   const userPrompt = [
     `Job request:\n${context.jobPrompt}`,
     '',
-    `Available tools:\n${availableToolsListing || 'None yet.'}`,
-    `Registry success rate: ${(context.registrySuccessRate * 100).toFixed(1)}%`,
+    `Your tools (mutations):\n${availableToolsListing || 'None yet - you will create your first tool.'}`,
+    `Your tool success rate: ${(context.registrySuccessRate * 100).toFixed(1)}%`,
     strictInstruction,
+    '',
+    'IMPORTANT: Tools you create are your unique mutations and have access to:',
+    '- NPM packages: axios, cheerio, lodash, date-fns, validator, uuid, and more',
+    '- Web research: webResearch(query) function for web queries',
+    '- Web fetching: fetchWebContent(url) for specific URLs',
+    '- HTML parsing: parseHTML(html) using cheerio',
+    '',
+    'Your tools are unique to you and represent your evolutionary mutations.',
+    'Tools should use REAL DATA from the web or compute actual results.',
+    'DO NOT create tools that return dummy, mock, or placeholder data.',
+    '',
     'Populate executionArgs with the exact JSON arguments required to invoke the chosen tool. ' +
       'If you specify createTool, include taskDescription, toolName, expectedInputs, expectedOutput. ' +
       'Return ONLY JSON.',
@@ -116,7 +127,7 @@ export async function builderPlan(
   const baseMessages = [
     {
       role: 'system' as const,
-      content: `You design or reuse JSON-callable tools for our tool builder. ${formatInstructions}`,
+      content: `You design or reuse powerful JSON-callable tools that access real data and external resources. Each tool you create is a unique mutation belonging only to you. Tools have access to npm packages and web browsing capabilities. Never create tools that return dummy or mock data - always use real information. ${formatInstructions}`,
     },
     {
       role: 'user' as const,
