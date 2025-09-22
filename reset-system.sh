@@ -8,6 +8,7 @@ set -e  # Exit on any error
 # Configuration
 BACKUP_DIR="backups/reset-$(date +%Y%m%d-%H%M%S)"
 TOOLS_DIR="packages/agents/src/generated-tools"
+DIST_TOOLS_DIR="packages/agents/dist/src/generated-tools"
 DB_FILE="apps/soup-runner/src/prisma/dev.db"
 REDIS_HOST="${REDIS_HOST:-localhost}"
 REDIS_PORT="${REDIS_PORT:-6379}"
@@ -51,18 +52,27 @@ fi
 
 # Step 3: Backup generated tools
 echo "🛠️  Backing up generated tools..."
+TOOL_COUNT=0
+MANIFEST_COUNT=0
+DIST_TOOL_COUNT=0
+DIST_MANIFEST_COUNT=0
+
 if [ -d "$TOOLS_DIR" ]; then
-    cp -r "$TOOLS_DIR" "$BACKUP_DIR/generated-tools"
-    
-    # Count tools for summary
-    TOOL_COUNT=$(find "$BACKUP_DIR/generated-tools" -name "*.js" | wc -l | tr -d ' ')
-    MANIFEST_COUNT=$(find "$BACKUP_DIR/generated-tools" -name "*.json" | wc -l | tr -d ' ')
-    
-    echo "✅ Generated tools backed up:"
-    echo "   - $TOOL_COUNT tool files"  
-    echo "   - $MANIFEST_COUNT manifest files"
+    cp -r "$TOOLS_DIR" "$BACKUP_DIR/generated-tools-src"
+    TOOL_COUNT=$(find "$BACKUP_DIR/generated-tools-src" -name "*.js" | wc -l | tr -d ' ')
+    MANIFEST_COUNT=$(find "$BACKUP_DIR/generated-tools-src" -name "*.json" | wc -l | tr -d ' ')
+    echo "✅ Source generated tools backed up"
 else
-    echo "⚠️  Generated tools directory not found, skipping tool backup"
+    echo "⚠️  Generated tools source directory not found, skipping source backup"
+fi
+
+if [ -d "$DIST_TOOLS_DIR" ]; then
+    cp -r "$DIST_TOOLS_DIR" "$BACKUP_DIR/generated-tools-dist"
+    DIST_TOOL_COUNT=$(find "$BACKUP_DIR/generated-tools-dist" -name "*.js" | wc -l | tr -d ' ')
+    DIST_MANIFEST_COUNT=$(find "$BACKUP_DIR/generated-tools-dist" -name "*.json" | wc -l | tr -d ' ')
+    echo "✅ Compiled generated tools backed up"
+else
+    echo "⚠️  Generated tools dist directory not found, skipping dist backup"
 fi
 
 # Step 4: Backup database (before clearing)
@@ -114,16 +124,12 @@ fi
 
 # Step 7: Clear generated tools
 echo "🛠️  Clearing generated tools..."
-if [ -d "$TOOLS_DIR" ]; then
-    rm -rf "$TOOLS_DIR"
-    mkdir -p "$TOOLS_DIR/code"
-    mkdir -p "$TOOLS_DIR/manifests"
-    echo "✅ Generated tools directory cleared and recreated"
-else
-    echo "⚠️  Generated tools directory not found, creating fresh directories"
-    mkdir -p "$TOOLS_DIR/code"
-    mkdir -p "$TOOLS_DIR/manifests"
-fi
+
+rm -rf "$TOOLS_DIR" "$DIST_TOOLS_DIR"
+mkdir -p "$TOOLS_DIR/code" "$TOOLS_DIR/manifests"
+mkdir -p "$DIST_TOOLS_DIR/code" "$DIST_TOOLS_DIR/manifests"
+
+echo "✅ Generated tools directories (src & dist) cleared and recreated"
 
 # Step 8: Create backup summary
 echo "📋 Creating backup summary..."
@@ -143,7 +149,8 @@ cat > "$BACKUP_DIR/README.md" << EOF
 
 ## System State Before Reset
 
-- **Tools Backed Up:** $TOOL_COUNT JavaScript files, $MANIFEST_COUNT manifest files
+- **Tools Backed Up (src):** $TOOL_COUNT JavaScript files, $MANIFEST_COUNT manifest files
+- **Tools Backed Up (dist):** $DIST_TOOL_COUNT JavaScript files, $DIST_MANIFEST_COUNT manifest files
 - **Database:** $([ -f "$DB_FILE" ] && echo "Backed up" || echo "Not found")
 - **Redis Queue:** Cleared
 - **Generated Tools:** Cleared and directories recreated
@@ -159,7 +166,8 @@ To restore from this backup:
 
 2. **Restore Generated Tools:**
    \`\`\`bash
-   cp -r $BACKUP_DIR/generated-tools/* packages/agents/src/generated-tools/
+   cp -r $BACKUP_DIR/generated-tools-src/* packages/agents/src/generated-tools/
+   cp -r $BACKUP_DIR/generated-tools-dist/* packages/agents/dist/src/generated-tools/
    \`\`\`
 
 3. **Restart Services:**

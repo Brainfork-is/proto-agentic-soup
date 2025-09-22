@@ -3,7 +3,7 @@
  * Format: [Name] the [Characteristic]
  */
 
-import { ChatVertexAI } from '@langchain/google-vertexai';
+import { PatchedChatVertexAI } from './patchedVertexAI';
 import { log, logError } from '@soup/common';
 
 export interface AgentName {
@@ -13,7 +13,7 @@ export interface AgentName {
 }
 
 export class NameGenerator {
-  private llm: ChatVertexAI;
+  private llm: PatchedChatVertexAI;
 
   constructor() {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT;
@@ -21,7 +21,7 @@ export class NameGenerator {
       throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
     }
 
-    this.llm = new ChatVertexAI({
+    this.llm = new PatchedChatVertexAI({
       model: process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash',
       temperature: 0.8, // Higher temperature for more creative names
       maxOutputTokens: 2000,

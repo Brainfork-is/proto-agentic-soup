@@ -1,0 +1,215 @@
+import JSON5 from 'json5';
+import { PatchedChatVertexAI } from '../patchedVertexAI';
+import { BuilderContext, BuilderPlan } from '../types';
+import { extractErrorMessage, toStringContent } from './utils';
+import { log } from '@soup/common';
+import type { LLMOptions } from './llm';
+
+export type LLMFactory = (options?: LLMOptions) => PatchedChatVertexAI;
+
+const extractFirstJsonObject = (value: string): string | null => {
+  const start = value.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let stringDelimiter: string | null = null;
+  for (let i = start; i < value.length; i += 1) {
+    const ch = value[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escape = true;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      if (!inString) {
+        inString = true;
+        stringDelimiter = ch;
+      } else if (stringDelimiter === ch) {
+        inString = false;
+        stringDelimiter = null;
+      }
+      continue;
+    }
+    if (inString) continue;
+    if (ch === '{') {
+      depth += 1;
+    } else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return value.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
+};
+
+const validatePlan = (plan: BuilderPlan): string | null => {
+  const hasToolSelection = Boolean(plan.reuseTool?.trim() || plan.createTool);
+
+  if (hasToolSelection) {
+    if (
+      !plan.executionArgs ||
+      typeof plan.executionArgs !== 'object' ||
+      Array.isArray(plan.executionArgs) ||
+      Object.keys(plan.executionArgs).length === 0
+    ) {
+      return 'executionArgs must be a non-empty JSON object containing the concrete arguments for the selected tool';
+    }
+  }
+
+  if (plan.createTool) {
+    const createTool = plan.createTool as unknown as Record<string, unknown>;
+    const toolName = createTool.toolName;
+    const taskDescription = createTool.taskDescription;
+    const expectedOutput = createTool.expectedOutput;
+    if (typeof toolName !== 'string' || toolName.trim().length === 0) {
+      return 'createTool.toolName must be a non-empty string';
+    }
+    if (typeof taskDescription !== 'string' || taskDescription.trim().length === 0) {
+      return 'createTool.taskDescription must be provided';
+    }
+    if (typeof expectedOutput !== 'string' || expectedOutput.trim().length === 0) {
+      return 'createTool.expectedOutput must describe the return format';
+    }
+  }
+
+  if (plan.reuseTool && typeof plan.reuseTool !== 'string') {
+    return 'reuseTool must be a string if provided';
+  }
+
+  return null;
+};
+
+export async function builderPlan(
+  context: BuilderContext,
+  llmFactory: LLMFactory
+): Promise<BuilderPlan> {
+  const llm = llmFactory({ responseMimeType: 'application/json' });
+
+  const availableToolsListing = context.availableTools
+    .map((tool) => `- ${tool.name}: ${tool.description || 'No description available.'}`)
+    .join('\n');
+
+  const strictInstruction = context.strictMode
+    ? 'You must either reuse an existing tool or respond with a new createTool specification.'
+    : 'Prefer to reuse or create a tool. If absolutely none fit, you may omit reuseTool/createTool but explain clearly why.';
+
+  const formatInstructions =
+    'Return strict JSON with the shape {"rationale": string, "reuseTool"?: string, "createTool"?: {"taskDescription": string, "toolName": string, "expectedInputs"?: object, "expectedOutput": string}, "executionArgs"?: object}. ' +
+    'All strings must use double quotes and objects must be valid JSON. No surrounding prose.';
+
+  const userPrompt = [
+    `Job request:\n${context.jobPrompt}`,
+    '',
+    `Available tools:\n${availableToolsListing || 'None yet.'}`,
+    `Registry success rate: ${(context.registrySuccessRate * 100).toFixed(1)}%`,
+    strictInstruction,
+    'Populate executionArgs with the exact JSON arguments required to invoke the chosen tool. ' +
+      'If you specify createTool, include taskDescription, toolName, expectedInputs, expectedOutput. ' +
+      'Return ONLY JSON.',
+  ].join('\n');
+
+  const baseMessages = [
+    {
+      role: 'system' as const,
+      content: `You design or reuse JSON-callable tools for our tool builder. ${formatInstructions}`,
+    },
+    {
+      role: 'user' as const,
+      content: userPrompt,
+    },
+  ];
+
+  const messages = [...baseMessages];
+  const maxRetries = 3;
+  let lastParsedPlan: BuilderPlan | null = null;
+  let lastValidationError: string | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    const response = await llm.invoke(messages);
+    let raw = toStringContent(response.content).trim();
+
+    if (raw.startsWith('```')) {
+      raw = raw
+        .replace(/^```(?:json)?/i, '')
+        .replace(/```$/i, '')
+        .trim();
+    }
+
+    try {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw || '{}');
+      } catch (jsonError) {
+        try {
+          parsed = JSON5.parse(raw || '{}');
+        } catch (json5Error) {
+          const firstJson = extractFirstJsonObject(raw || '');
+          if (!firstJson) throw json5Error;
+          try {
+            parsed = JSON.parse(firstJson);
+          } catch {
+            parsed = JSON5.parse(firstJson);
+          }
+        }
+      }
+
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Response was not a JSON object');
+      }
+
+      const plan = parsed as BuilderPlan;
+      if (typeof plan.rationale !== 'string' || plan.rationale.length === 0) {
+        throw new Error('Missing rationale');
+      }
+
+      lastParsedPlan = plan;
+
+      const validationError = validatePlan(plan);
+      if (validationError) {
+        log(
+          `[builderPlan] Validation failed (attempt ${attempt + 1}/${maxRetries}): ${validationError}`
+        );
+        lastValidationError = validationError;
+        messages.push({
+          role: 'user' as const,
+          content: `Your previous reply was invalid: ${validationError}. Respond again with ONLY valid JSON matching the required schema.`,
+        });
+        continue;
+      }
+
+      return plan;
+    } catch (error) {
+      const errorMsg = extractErrorMessage(error, 'Invalid JSON response');
+      log(
+        `[builderPlan] Parse failed (attempt ${attempt + 1}/${maxRetries}): ${errorMsg}. Raw response: ${raw.slice(0, 200)}`
+      );
+      messages.push({
+        role: 'user' as const,
+        content: `Your previous reply failed to parse (${errorMsg}). Respond again with ONLY valid JSON matching the required schema.`,
+      });
+    }
+  }
+
+  if (lastParsedPlan) {
+    if (lastValidationError) {
+      log(
+        `[builderPlan] Returning last parsed plan despite validation error: ${lastValidationError}`
+      );
+    } else {
+      log('[builderPlan] Returning last parsed plan after exhausting retries.');
+    }
+
+    if (!lastParsedPlan.executionArgs || typeof lastParsedPlan.executionArgs !== 'object') {
+      lastParsedPlan.executionArgs = {};
+    }
+
+    return lastParsedPlan;
+  }
+
+  throw new Error('Builder plan could not be parsed after multiple attempts');
+}

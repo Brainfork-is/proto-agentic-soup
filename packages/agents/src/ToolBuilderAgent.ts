@@ -1,464 +1,224 @@
 /**
- * Tool Builder Agent - Self-improving agent that can create custom tools
- * Extends SimpleReactAgent with dynamic tool creation capabilities
+ * Tool Builder Agent - Orchestrates tool creation and execution without LangChain's React agent.
  */
 
-import { createReactAgent } from '@langchain/langgraph/prebuilt';
-import { ChatVertexAI } from '@langchain/google-vertexai';
-import { DynamicTool } from '@langchain/core/tools';
 import { JobData, log, logError } from '@soup/common';
 import { CodeGeneratorTool } from './tools/codeGenerator';
 import { dynamicToolLoader } from './tools/dynamicToolLoader';
-
-// Create Vertex AI LLM instance
-function createVertexAILLM() {
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-  const model = process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash';
-  const temperature = parseFloat(process.env.VERTEX_AI_TEMPERATURE || '0.7');
-  const maxOutputTokens = parseInt(process.env.VERTEX_AI_MAX_OUTPUT_TOKENS || '1500');
-
-  if (!projectId) {
-    throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
-  }
-
-  return new ChatVertexAI({
-    model,
-    temperature,
-    maxOutputTokens,
-    authOptions: {
-      credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
-        ? undefined
-        : process.env.GOOGLE_CLOUD_CREDENTIALS
-          ? JSON.parse(Buffer.from(process.env.GOOGLE_CLOUD_CREDENTIALS, 'base64').toString())
-          : undefined,
-    },
-  });
-}
-
-// Convert our tool interface to LangChain-compatible tools
-function createLangChainTool(tool: any) {
-  return new DynamicTool({
-    name: tool.name,
-    description: tool.description,
-    func: async (input: string) => {
-      try {
-        // Parse input if it's a JSON string
-        let params;
-        try {
-          params = typeof input === 'string' ? JSON.parse(input) : input;
-        } catch {
-          // If not JSON, treat as simple string parameter
-          params = { input };
-        }
-
-        // Execute via dynamicToolLoader to record usage metrics
-        const result = await dynamicToolLoader.executeTool(tool.name, params);
-        // Ensure a string is returned
-        return typeof result === 'string' ? result : JSON.stringify(result);
-      } catch (error) {
-        const errorMsg =
-          error && typeof error === 'object' && 'message' in error
-            ? (error as any).message
-            : 'Tool execution failed';
-        return JSON.stringify({
-          success: false,
-          error: errorMsg,
-        });
-      }
-    },
-  });
-}
+import { builderPlan } from './toolBuilder/builder';
+import { runnerExecute } from './toolBuilder/runner';
+import { createToolBuilderLLM } from './toolBuilder/llm';
+import {
+  extractErrorMessage,
+  normalizeCodeGeneratorRequest,
+  sanitizeToolInput,
+  toStringContent,
+} from './toolBuilder/utils';
+import { AvailableToolSummary } from './types';
 
 export class ToolBuilderAgent {
-  private agent: any;
-  private availableTools: any[] = [];
+  private availableTools: AvailableToolSummary[] = [];
   private initializationPromise: Promise<void>;
   public id: string;
   public archetype = 'tool-builder';
+  private strictModeEnabled: boolean;
 
   constructor(id: string) {
     this.id = id;
+    const strictEnv = (process.env.TOOL_BUILDER_STRICT_MODE || 'true').toLowerCase();
+    this.strictModeEnabled = !(strictEnv === '0' || strictEnv === 'false' || strictEnv === 'off');
     log(`[ToolBuilderAgent] Constructor called for agent ${id}`);
     this.initializationPromise = this.initializeAgent();
   }
 
   private async initializeAgent() {
     try {
-      // Create the LLM
-      const llm = createVertexAILLM();
-
-      // Create agent-specific code generator tool with bound agent ID
-      const agentSpecificCodeGenerator = this.createAgentSpecificCodeGenerator();
-      // Only include the code generator by default; no general-purpose tools
-      this.availableTools = [agentSpecificCodeGenerator];
-
-      // Load existing tools for this agent
-      const loadedTools = await dynamicToolLoader.loadToolsForAgent(this.id);
-      const langChainTools = loadedTools.map((tool) => createLangChainTool(tool));
-      this.availableTools.push(...langChainTools);
-
-      // Create system message
-      const systemMessage = this.createSystemMessage();
-
-      // Create the React agent
-      this.agent = createReactAgent({
-        llm,
-        tools: this.availableTools,
-        messageModifier: systemMessage,
-      });
-
-      const registryStats = dynamicToolLoader.getRegistryStats();
-      const availableNames = this.availableTools.map((t: any) => t.name).join(', ');
+      await this.reloadTools();
       log(
-        `[ToolBuilderAgent] Initialized agent ${this.id} with ${this.availableTools.length} tools (${registryStats.totalTools} from registry). Tools: ${availableNames}`
+        `[ToolBuilderAgent] Initialized agent ${this.id} with ${this.availableTools.length} tools`
       );
     } catch (error) {
-      const errorMsg =
-        error && typeof error === 'object' && 'message' in error
-          ? error.message
-          : 'Unknown initialization error';
+      const errorMsg = extractErrorMessage(error, 'Unknown initialization error');
       logError(`[ToolBuilderAgent] Failed to initialize agent ${this.id}: ${errorMsg}`, error);
       throw new Error(`ToolBuilderAgent initialization failed: ${errorMsg}`);
     }
   }
 
-  private createSystemMessage(): string {
-    const toolNames = this.availableTools.map((t) => t.name).join(', ');
-    const registryStats = dynamicToolLoader.getRegistryStats();
-
-    return `You are an advanced AI agent with the ability to create custom tools when needed.
-
-AVAILABLE TOOLS: ${toolNames}
-
-TOOL CREATION CAPABILITY:
-- You have access to a 'code_generator' tool that can create custom JavaScript tools
-- Use this when existing tools cannot solve the task effectively
-- Custom tools persist and can be reused for future similar tasks
-- Currently ${registryStats.totalTools} custom tools in registry with ${(registryStats.averageSuccessRate * 100).toFixed(1)}% average success rate
-
-WHEN TO CREATE NEW TOOLS:
-1. Current tools cannot accomplish the task
-2. Task requires specialized processing not available in existing tools  
-3. You need a more efficient solution for a specific type of problem
-4. Complex data transformations or calculations are needed
-
-HOW TO CREATE TOOLS:
-1. Use code_generator with these parameters:
-   - taskDescription: Detailed description of what the tool should do
-   - toolName: Unique name (alphanumeric + underscores only)
-   - expectedInputs: Object describing input parameters and their types
-   - expectedOutput: Description of expected output format
-
-TOOL CREATION EXAMPLE:
-To create a tool for calculating compound interest:
-Use code_generator with:
-{
-  "taskDescription": "Calculate compound interest given principal, rate, time, and compounding frequency",
-  "toolName": "compound_interest_calculator", 
-  "expectedInputs": {"principal": "number", "rate": "number", "time": "number", "frequency": "number"},
-  "expectedOutput": "JSON with final amount, interest earned, and calculation breakdown"
-}
-
-EXECUTION CONSTRAINTS:
-- STRICT MODE: You MUST use tools to produce your final answer.
-- If an appropriate tool does not exist, you MUST create one via code_generator and then execute it.
-- Do NOT provide a direct LLM-only answer under any circumstance.
-- If after attempting tool creation you cannot execute a tool to complete the task, explicitly fail.
-- This is a ONE-SHOT task - you cannot ask for clarification
-- Work with the information provided in the prompt
-- Make reasonable assumptions if details seem incomplete
-- Always provide complete responses
-
-IMPORTANT GUIDELINES:
-1. Try existing tools first before creating new ones
-2. Only create tools when genuinely needed for the specific task
-3. Give tools descriptive, specific names
-4. If a custom tool fails during execution and you cannot proceed, the entire task fails — do not answer from the LLM alone
-5. Custom tools should be focused on the specific task at hand
-
-Always provide actionable, complete responses using the best available tools.`;
-  }
-
-  /**
-   * Create agent-specific code generator tool with bound agent ID
-   */
-  private createAgentSpecificCodeGenerator(): DynamicTool {
-    return new DynamicTool({
-      name: 'code_generator',
-      description:
-        'Generate custom JavaScript tools for specific tasks when existing tools are insufficient. Call with JSON object containing: taskDescription (string), toolName (string), expectedInputs (object mapping param names to type descriptions), expectedOutput (string description).',
-      func: async (input: any): Promise<string> => {
-        try {
-          log(`[AgentSpecificCodeGenerator] Agent ${this.id} calling code generator`);
-
-          let params: any;
-
-          // Handle different input formats from LangGraph
-          if (typeof input === 'string') {
-            try {
-              params = JSON.parse(input);
-            } catch (parseError) {
-              const errorMsg = `Invalid JSON input: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`;
-              return JSON.stringify({ success: false, error: errorMsg });
-            }
-          } else if (typeof input === 'object' && input !== null) {
-            params = input;
-          } else {
-            const errorMsg = `Invalid input type: expected string (JSON) or object, got ${typeof input}`;
-            return JSON.stringify({ success: false, error: errorMsg });
-          }
-
-          // Inject agent ID into parameters
-          params.agentId = this.id;
-          log(`[AgentSpecificCodeGenerator] Injected agent ID: ${this.id}`);
-
-          // Call the actual code generator tool
-          const generator = new CodeGeneratorTool();
-          return await generator.invoke(params);
-        } catch (error) {
-          const errorMsg =
-            error && typeof error === 'object' && 'message' in error
-              ? error.message
-              : 'Code generation failed';
-          logError(
-            `[AgentSpecificCodeGenerator] Agent ${this.id} tool generation failed: ${errorMsg}`
-          );
-          return JSON.stringify({ success: false, error: errorMsg });
-        }
-      },
-    });
-  }
-
-  async handle(job: JobData): Promise<any> {
+  private async reloadTools(): Promise<void> {
     try {
-      // Wait for initialization to complete
-      await this.initializationPromise;
+      const loadedTools = await dynamicToolLoader.loadToolsForAgent(this.id);
+      this.availableTools = loadedTools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+      }));
+    } catch (error) {
+      const errorMsg = extractErrorMessage(error, 'Unknown reload error');
+      logError(`[ToolBuilderAgent] Failed to reload tools for agent ${this.id}: ${errorMsg}`);
+    }
+  }
 
-      log(`[ToolBuilderAgent] Agent ${this.id} processing job`);
+  async handle(job: JobData & { dbJobId?: string }): Promise<any> {
+    await this.initializationPromise;
 
-      // Extract the job prompt
-      const prompt =
-        typeof job.payload === 'string'
-          ? job.payload
-          : job.payload.prompt || JSON.stringify(job.payload);
+    const jobPrompt =
+      typeof job.payload === 'string'
+        ? job.payload
+        : job.payload.prompt || JSON.stringify(job.payload);
+    const jobId = (job as any).dbJobId || 'unknown';
 
-      // Add agent context to the prompt for tool creation
-      const contextualPrompt = `${prompt}
+    try {
+      const registryStats = dynamicToolLoader.getRegistryStats();
+      const plan = await builderPlan(
+        {
+          jobPrompt,
+          availableTools: this.availableTools,
+          strictMode: this.strictModeEnabled,
+          registrySuccessRate: registryStats.averageSuccessRate || 0,
+        },
+        createToolBuilderLLM
+      );
 
-[AGENT_CONTEXT: You are agent ${this.id} with tool creation capabilities. Create custom tools if needed for this specific task.]`;
+      let newToolsCreated = false;
+      let toolUsed = plan.reuseTool?.trim() || '';
 
-      // Invoke the agent with the prompt
-      const result = await this.agent.invoke({
-        messages: [{ role: 'user', content: contextualPrompt }],
+      if (plan.createTool) {
+        const normalized = normalizeCodeGeneratorRequest({
+          ...(plan.createTool as unknown as Record<string, unknown>),
+          agentId: this.id,
+        });
+        const generator = new CodeGeneratorTool();
+        log(
+          `[ToolBuilderAgent] Job ${jobId} generating tool ${normalized.toolName} with description: ${normalized.taskDescription}`
+        );
+        const raw = await generator.invoke(normalized);
+        const parsed = JSON.parse(raw || '{}');
+        if (
+          !parsed ||
+          parsed.success !== true ||
+          typeof parsed.toolName !== 'string' ||
+          parsed.toolName.length === 0
+        ) {
+          throw new Error(parsed?.error || 'Tool generation failed');
+        }
+        toolUsed = parsed.toolName;
+        newToolsCreated = true;
+        await this.reloadTools();
+      }
+
+      const loadedTool = await dynamicToolLoader.ensureTool(toolUsed);
+      const expectedInputs = loadedTool.manifest?.originalRequest?.expectedInputs || {};
+
+      const initialArgs = sanitizeToolInput(plan.executionArgs ?? {});
+      const initialArgObject =
+        initialArgs && typeof initialArgs === 'object' && !Array.isArray(initialArgs)
+          ? (initialArgs as Record<string, unknown>)
+          : {};
+
+      const enrichedArgs = await this.enrichExecutionArgs({
+        toolName: toolUsed,
+        jobPrompt,
+        builderRationale: plan.rationale,
+        currentArgs: initialArgObject,
+        expectedInputs,
       });
 
-      // Extract the final response
-      let messages = (result as any).messages || [];
-      let lastMessage = messages[messages.length - 1];
-      let response = lastMessage?.content || 'No response generated';
+      const sanitizedArgsRaw = sanitizeToolInput(enrichedArgs);
+      const sanitizedArgs =
+        sanitizedArgsRaw && typeof sanitizedArgsRaw === 'object' && !Array.isArray(sanitizedArgsRaw)
+          ? (sanitizedArgsRaw as Record<string, unknown>)
+          : {};
+      const argsPreview = JSON.stringify(sanitizedArgs).slice(0, 200);
 
-      // Check if new tools were created by looking for code_generator usage
-      let newToolsCreated = false;
-      let toolsUsed = false;
-      let usedNonGeneratorTool = false;
-
-      // Helper to coerce message content to string
-      const toStringContent = (content: any): string => {
-        if (typeof content === 'string') return content;
-        if (Array.isArray(content)) {
-          // Try to find a text-like entry
-          for (const item of content) {
-            if (typeof item === 'string') return item;
-            if (item && typeof item === 'object') {
-              if (typeof (item as any).text === 'string') return (item as any).text;
-              if (typeof (item as any).content === 'string') return (item as any).content;
-            }
-          }
-          return JSON.stringify(content);
-        }
-        if (content && typeof content === 'object') {
-          if (typeof (content as any).text === 'string') return (content as any).text;
-          if (typeof (content as any).content === 'string') return (content as any).content;
-          return JSON.stringify(content);
-        }
-        return String(content ?? '');
-      };
-
-      // Build an index from tool_call_id -> tool result content
-      const toolResultById = new Map<string, { name?: string; content: string }>();
-      for (const msg of messages) {
-        const toolCallId =
-          (msg as any).tool_call_id ?? (msg as any).additional_kwargs?.tool_call_id;
-        const msgName = (msg as any).name ?? (msg as any).additional_kwargs?.name;
-        const msgType = (msg as any)._getType?.() ?? (msg as any).type;
-        // ToolMessage in LangChain typically has type 'tool'
-        if (toolCallId && (msgType === 'tool' || typeof (msg as any).content !== 'undefined')) {
-          try {
-            const contentStr = toStringContent((msg as any).content);
-            toolResultById.set(toolCallId, { name: msgName, content: contentStr });
-          } catch {
-            // ignore content extraction errors
-          }
-        }
-      }
-
-      for (const msg of messages) {
-        const toolCalls =
-          (msg as any).tool_calls || (msg as any).additional_kwargs?.tool_calls || [];
-        if (toolCalls && toolCalls.length > 0) {
-          toolsUsed = true;
-          for (const call of toolCalls) {
-            if (call?.name && call?.name !== 'code_generator') {
-              usedNonGeneratorTool = true;
-            }
-            if (call?.name === 'code_generator') {
-              try {
-                log(
-                  `[ToolBuilderAgent] Full tool call structure: ${JSON.stringify(call, null, 2)}`
-                );
-
-                // Prefer matching ToolMessage by tool_call_id
-                let outputStr: string | undefined;
-                const callId: string | undefined = call.id || call.tool_call_id || call.call_id;
-                if (callId && toolResultById.has(callId)) {
-                  const rec = toolResultById.get(callId)!;
-                  outputStr = rec.content;
-                }
-
-                // Fallbacks (some runtimes might inline results differently)
-                if (!outputStr) {
-                  outputStr = call.output || call.result || call.return_value;
-                }
-
-                if (!outputStr || typeof outputStr !== 'string') {
-                  // As a last resort, try to find the last tool result message for code_generator
-                  const lastToolMsg = messages
-                    .slice()
-                    .reverse()
-                    .find((m: any) => {
-                      const mType = m?._getType?.() ?? m?.type;
-                      const mName = m?.name ?? m?.additional_kwargs?.name;
-                      return (
-                        mType === 'tool' && (mName === 'code_generator' || mName === call?.name)
-                      );
-                    });
-                  if (lastToolMsg) {
-                    outputStr = toStringContent((lastToolMsg as any).content);
-                  }
-                }
-
-                log(
-                  `[ToolBuilderAgent] Raw code_generator output: ${JSON.stringify(outputStr ?? '{}')}`
-                );
-
-                const parsed = JSON.parse(outputStr ?? '{}');
-                log(`[ToolBuilderAgent] Parsed result: ${JSON.stringify(parsed)}`);
-
-                if (parsed && parsed.success === true) {
-                  newToolsCreated = true;
-                  log(
-                    `[ToolBuilderAgent] Agent ${this.id} successfully created tool: ${parsed.toolName || 'unknown'}`
-                  );
-                  await this.reloadTools();
-                } else {
-                  log(
-                    `[ToolBuilderAgent] Agent ${this.id} attempted tool creation but failed: ${parsed?.error || 'Unknown error'}`
-                  );
-                }
-              } catch (parseError) {
-                log(
-                  `[ToolBuilderAgent] Agent ${this.id} called code_generator but couldn't parse result: ${parseError instanceof Error ? parseError.message : 'Unknown parse error'}`
-                );
-              }
-              // Only need to process the first code_generator call per message
-              break;
-            }
-          }
-        }
-      }
-
-      // If we created new tools, perform a second pass to use them
-      if (newToolsCreated) {
-        const rerunPrompt = `${prompt}\n\n[AGENT_CONTEXT: You have just created a custom tool. Now use your available tools to fully solve the task and return the final answer.]`;
-        const second = await this.agent.invoke({
-          messages: [{ role: 'user', content: rerunPrompt }],
-        });
-        const secondMessages = (second as any).messages || [];
-        if (secondMessages.length > 0) {
-          messages = [...messages, ...secondMessages];
-          lastMessage = secondMessages[secondMessages.length - 1];
-          response = lastMessage?.content || response;
-        }
-      }
-
-      // If we created new tools, perform a second pass to use them
-      if (newToolsCreated) {
-        const rerunPrompt = `${prompt}\n\n[AGENT_CONTEXT: You have just created a custom tool. Now use your available tools to fully solve the task and return the final answer.]`;
-        const second = await this.agent.invoke({
-          messages: [{ role: 'user', content: rerunPrompt }],
-        });
-        const secondMessages = (second as any).messages || [];
-        if (secondMessages.length > 0) {
-          messages = [...messages, ...secondMessages];
-          lastMessage = secondMessages[secondMessages.length - 1];
-          response = lastMessage?.content || response;
-        }
-
-        // Track tool usage in second pass as well
-        for (const msg of secondMessages) {
-          const toolCalls =
-            (msg as any).tool_calls || (msg as any).additional_kwargs?.tool_calls || [];
-          if (toolCalls && toolCalls.length > 0) {
-            toolsUsed = true;
-            for (const call of toolCalls) {
-              if (call?.name && call?.name !== 'code_generator') {
-                usedNonGeneratorTool = true;
-              }
-            }
-          }
-        }
-      }
-
-      // Enforce strict mode: must use at least one non-code_generator tool
-      if (!usedNonGeneratorTool) {
+      if (!toolUsed) {
+        const rationale = plan.rationale || 'Builder did not select a usable tool.';
         log(
-          `[ToolBuilderAgent] Strict mode: no non-code_generator tool usage detected. Marking job as failed.`
+          `[ToolBuilderAgent] Job ${jobId} produced no tool selection (strictMode=${this.strictModeEnabled}). Rationale: ${rationale}`
         );
+
+        if (this.strictModeEnabled) {
+          return {
+            ok: false,
+            artifact: this.buildArtifact({
+              answer: rationale,
+              toolsUsed: [],
+              error: true,
+              errorDescription: 'Builder did not select a tool in strict mode.',
+            }),
+            stepsUsed: 1,
+            archetype: this.archetype,
+            toolsUsed: false,
+            newToolsCreated,
+            totalToolsAvailable: this.availableTools.length,
+            selectedTool: null,
+            builderRationale: plan.rationale,
+            executionArgs: sanitizedArgs,
+          };
+        }
+
         return {
-          ok: false,
-          artifact:
-            'Strict mode: tool-builder must create and/or use tools. No non-code_generator tool usage detected.',
-          stepsUsed: messages.length,
+          ok: true,
+          artifact: this.buildArtifact({
+            answer: rationale,
+            toolsUsed: [],
+            error: false,
+            errorDescription: '',
+          }),
+          stepsUsed: 1,
           archetype: this.archetype,
-          toolsUsed,
+          toolsUsed: false,
           newToolsCreated,
           totalToolsAvailable: this.availableTools.length,
+          selectedTool: null,
+          builderRationale: plan.rationale,
+          executionArgs: sanitizedArgs,
         };
       }
 
-      log(
-        `[ToolBuilderAgent] Agent ${this.id} completed job (tools used: ${toolsUsed}, new tools created: ${newToolsCreated})`
+      const runnerResult = await runnerExecute(
+        {
+          toolName: toolUsed,
+          args: sanitizedArgs,
+          jobPrompt,
+          builderRationale: plan.rationale,
+        },
+        createToolBuilderLLM
       );
 
+      log(
+        `[ToolBuilderAgent] Job ${jobId} executed ${toolUsed} (newTool=${newToolsCreated}) args=${argsPreview} ok=${runnerResult.ok}`
+      );
+      log(
+        `[ToolBuilderAgent] Job ${jobId} tool output snippet: ${runnerResult.toolOutput.slice(0, 200)}`
+      );
+
+      const stepsUsed = 2 + (newToolsCreated ? 1 : 0);
+
       return {
-        ok: true,
-        artifact: response,
-        stepsUsed: messages.length,
+        ok: runnerResult.ok,
+        artifact: runnerResult.finalResponse,
+        stepsUsed,
         archetype: this.archetype,
-        toolsUsed,
+        toolsUsed: true,
         newToolsCreated,
         totalToolsAvailable: this.availableTools.length,
+        selectedTool: toolUsed,
+        builderRationale: plan.rationale,
+        executionArgs: sanitizedArgs,
+        toolOutputSnippet: runnerResult.toolOutput.slice(0, 500),
+        summarySource: runnerResult.summarySource,
       };
     } catch (error) {
-      const errorMsg =
-        error && typeof error === 'object' && 'message' in error
-          ? error.message
-          : 'Unknown execution error';
-      logError(`[ToolBuilderAgent] Agent ${this.id} failed: ${errorMsg}`, error);
+      const errorMsg = extractErrorMessage(error, 'Unknown execution error');
+      logError(`[ToolBuilderAgent] Agent ${this.id} failed on job ${jobId}: ${errorMsg}`, error);
 
       return {
         ok: false,
-        artifact: `Tool builder agent execution failed: ${errorMsg}`,
+        artifact: this.buildArtifact({
+          answer: 'Tool builder agent execution failed.',
+          toolsUsed: [],
+          error: true,
+          errorDescription: errorMsg,
+        }),
         stepsUsed: 0,
         archetype: this.archetype,
         newToolsCreated: false,
@@ -466,46 +226,6 @@ Always provide actionable, complete responses using the best available tools.`;
     }
   }
 
-  /**
-   * Reload tools to include newly created ones
-   */
-  private async reloadTools(): Promise<void> {
-    try {
-      // Get updated tools from loader
-      const loadedTools = await dynamicToolLoader.loadToolsForAgent(this.id);
-
-      // Convert to LangChain format and add to code generator
-      const newLangChainTools = loadedTools.map((tool) => createLangChainTool(tool));
-      const agentSpecificCodeGenerator = this.createAgentSpecificCodeGenerator();
-      // Only include code generator + dynamically loaded custom tools
-      this.availableTools = [agentSpecificCodeGenerator, ...newLangChainTools];
-
-      // Recreate agent with updated tools
-      const llm = createVertexAILLM();
-      const systemMessage = this.createSystemMessage();
-
-      this.agent = createReactAgent({
-        llm,
-        tools: this.availableTools,
-        messageModifier: systemMessage,
-      });
-
-      log(`[ToolBuilderAgent] Reloaded agent ${this.id} with ${this.availableTools.length} tools`);
-    } catch (error) {
-      const errorMsg =
-        error && typeof error === 'object' && 'message' in error
-          ? error.message
-          : 'Unknown reload error';
-      logError(
-        `[ToolBuilderAgent] Failed to reload tools for agent ${this.id}: ${errorMsg}`,
-        error
-      );
-    }
-  }
-
-  /**
-   * Get agent statistics
-   */
   getStats(): {
     agentId: string;
     archetype: string;
@@ -514,7 +234,6 @@ Always provide actionable, complete responses using the best available tools.`;
     registryStats: any;
   } {
     const registryStats = dynamicToolLoader.getRegistryStats();
-
     return {
       agentId: this.id,
       archetype: this.archetype,
@@ -522,5 +241,91 @@ Always provide actionable, complete responses using the best available tools.`;
       customToolsAvailable: registryStats.totalTools,
       registryStats,
     };
+  }
+
+  private buildArtifact(options: {
+    answer: string;
+    toolsUsed: string[];
+    error: boolean;
+    errorDescription: string;
+  }): string {
+    const payload = {
+      answer: options.answer,
+      tools_used: options.toolsUsed,
+      error: options.error,
+      error_description: options.errorDescription,
+    };
+
+    return JSON.stringify(payload, null, 2);
+  }
+
+  private async enrichExecutionArgs(options: {
+    toolName: string;
+    jobPrompt: string;
+    builderRationale: string;
+    currentArgs: Record<string, unknown>;
+    expectedInputs: Record<string, string>;
+  }): Promise<Record<string, unknown>> {
+    const { toolName, jobPrompt, builderRationale, currentArgs, expectedInputs } = options;
+    const entries = Object.entries(expectedInputs || {});
+
+    if (entries.length === 0) {
+      return currentArgs;
+    }
+
+    const missingKeys = entries
+      .map(([key]) => key)
+      .filter((key) => currentArgs[key] === undefined || currentArgs[key] === '');
+
+    if (missingKeys.length === 0) {
+      return currentArgs;
+    }
+
+    const fieldsDescription = entries.map(([key, desc]) => `- ${key}: ${desc}`).join('\n');
+
+    try {
+      const llm = createToolBuilderLLM({ responseMimeType: 'application/json' });
+      const response = await llm.invoke([
+        {
+          role: 'system',
+          content:
+            'You generate concrete JSON arguments to invoke a tool. ' +
+            'Return ONLY a JSON object mapping input names to usable values. ' +
+            'Numbers must be numeric (no quotes) and arrays must be proper JSON arrays.',
+        },
+        {
+          role: 'user',
+          content: [
+            `Tool: ${toolName}`,
+            `Job request:\n${jobPrompt}`,
+            `Builder rationale: ${builderRationale}`,
+            `Expected inputs:\n${fieldsDescription}`,
+            `Existing arguments: ${JSON.stringify(currentArgs)}`,
+            'Provide values for every expected input. Return ONLY JSON.',
+          ].join('\n\n'),
+        },
+      ]);
+
+      let raw = toStringContent(response.content).trim();
+      if (raw.startsWith('```')) {
+        raw = raw
+          .replace(/^```(?:json)?/i, '')
+          .replace(/```$/i, '')
+          .trim();
+      }
+
+      const parsed = JSON.parse(raw || '{}');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Synthesised arguments were not a JSON object');
+      }
+
+      return { ...currentArgs, ...(parsed as Record<string, unknown>) };
+    } catch (error) {
+      logError(
+        `[ToolBuilderAgent] Failed to synthesise execution args for ${toolName}: ${extractErrorMessage(error)}`,
+        error
+      );
+      return currentArgs;
+    }
   }
 }

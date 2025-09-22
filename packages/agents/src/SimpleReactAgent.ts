@@ -4,7 +4,7 @@
  */
 
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
-import { ChatVertexAI } from '@langchain/google-vertexai';
+import { PatchedChatVertexAI } from './patchedVertexAI';
 import { WikipediaQueryRun } from '@langchain/community/tools/wikipedia_query_run';
 import { WebBrowser } from 'langchain/tools/webbrowser';
 import { SerpAPI } from '@langchain/community/tools/serpapi';
@@ -29,7 +29,7 @@ function createVertexAILLM() {
     throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
   }
 
-  return new ChatVertexAI({
+  return new PatchedChatVertexAI({
     model,
     temperature,
     maxOutputTokens,

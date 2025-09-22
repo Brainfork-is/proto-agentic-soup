@@ -4,7 +4,7 @@
  */
 
 import { JobData } from '@soup/common';
-import { ChatVertexAI } from '@langchain/google-vertexai';
+import { PatchedChatVertexAI } from '../patchedVertexAI';
 import { StateGraph, END, START } from '@langchain/langgraph';
 import { MemorySaver } from '@langchain/langgraph';
 import { RunnableConfig } from '@langchain/core/runnables';
@@ -29,7 +29,7 @@ function createVertexAILLM() {
     `[LangGraphAgent] Initializing Vertex AI with model: ${model}, temperature: ${temperature}, maxTokens: ${maxOutputTokens}`
   );
 
-  return new ChatVertexAI({
+  return new PatchedChatVertexAI({
     model,
     temperature,
     maxOutputTokens,

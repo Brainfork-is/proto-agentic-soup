@@ -3,7 +3,7 @@
  * Uses Vertex AI exclusively via LangChain integration
  */
 
-import { ChatVertexAI } from '@langchain/google-vertexai';
+import { PatchedChatVertexAI } from './patchedVertexAI';
 
 export interface GeneratedJob {
   category: 'web_research' | 'summarize' | 'classify' | 'math';
@@ -24,7 +24,7 @@ export class JobGenerator {
       throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
     }
 
-    return new ChatVertexAI({
+    return new PatchedChatVertexAI({
       model,
       temperature: 0.8, // Higher temperature for variety
       maxOutputTokens: 400,
@@ -121,7 +121,7 @@ Make the content interesting and varied. Avoid repetition from previous generati
 
     console.log(`[JobGenerator] Requesting ${category} job from Vertex AI...`);
 
-    // Use ChatVertexAI directly (same config as LangGraphAgent)
+    // Use PatchedChatVertexAI directly (same config as LangGraphAgent)
     const llm = this.createVertexAILLM();
     const response = await llm.invoke(prompt);
 

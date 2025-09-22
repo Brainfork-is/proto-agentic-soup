@@ -5,6 +5,7 @@
 import { log, logError } from '@soup/common';
 import path from 'path';
 import fs from 'fs-extra';
+import crypto from 'crypto';
 
 interface ToolManifest {
   toolName: string;
@@ -23,7 +24,7 @@ interface ToolManifest {
   failureCount: number;
 }
 
-interface LoadedTool {
+export interface LoadedTool {
   name: string;
   description: string;
   invoke: (params: any) => Promise<string>;
@@ -68,6 +69,8 @@ export class DynamicToolLoader {
       let ownToolsCount = 0;
       let sharedToolsCount = 0;
 
+      const seenToolNames = new Set<string>();
+
       for (const [toolName, manifest] of this.manifestCache) {
         try {
           // Load tools created by this agent, or successful tools from others
@@ -105,9 +108,16 @@ export class DynamicToolLoader {
 
             const tool = await this.loadSingleTool(toolName, manifest);
             if (tool) {
-              availableTools.push(tool);
-              if (isOwnTool) ownToolsCount++;
-              else sharedToolsCount++;
+              if (seenToolNames.has(tool.name)) {
+                log(
+                  `[DynamicToolLoader] Skipping duplicate tool ${tool.name} for agent ${agentId}`
+                );
+              } else {
+                seenToolNames.add(tool.name);
+                availableTools.push(tool);
+                if (isOwnTool) ownToolsCount++;
+                else sharedToolsCount++;
+              }
             }
           }
 
@@ -158,6 +168,31 @@ export class DynamicToolLoader {
       logError(`[DynamicToolLoader] Failed to load tool ${toolName}:`, error);
       return null;
     }
+  }
+
+  async ensureTool(toolName: string): Promise<LoadedTool> {
+    const existing = this.toolRegistry.get(toolName);
+    if (existing) {
+      return existing;
+    }
+
+    const loaded = await this.loadToolByName(toolName);
+    if (loaded) {
+      return loaded;
+    }
+
+    // Cache might be stale, perform full reload once more before failing
+    await this.loadAllManifests();
+    for (const [manifestKey, manifest] of this.manifestCache) {
+      if (manifest.toolName === toolName) {
+        const retried = await this.loadSingleTool(manifestKey, manifest);
+        if (retried) {
+          return retried;
+        }
+      }
+    }
+
+    throw new Error(`Tool ${toolName} not found in registry or manifests`);
   }
 
   /**
@@ -237,36 +272,52 @@ export class DynamicToolLoader {
     manifestKey: string,
     manifest: ToolManifest
   ): Promise<LoadedTool | null> {
-    try {
-      // Check if already loaded
-      if (this.toolRegistry.has(manifest.toolName)) {
-        return this.toolRegistry.get(manifest.toolName)!;
-      }
-
-      const toolFilePath = path.resolve(manifest.filePath);
-
-      // Check if file exists
-      if (!(await fs.pathExists(toolFilePath))) {
-        logError(`[DynamicToolLoader] Tool file not found: ${toolFilePath}`);
-        return null;
-      }
-
-      // Read and validate tool code
-      const toolCode = await fs.readFile(toolFilePath, 'utf-8');
-
-      // Create safe execution context
-      const tool = await this.createToolFromCode(toolCode, manifest);
-
-      if (tool) {
-        this.toolRegistry.set(manifest.toolName, tool);
-        log(`[DynamicToolLoader] Loaded tool: ${manifest.toolName}`);
-      }
-
-      return tool;
-    } catch (error) {
-      logError(`[DynamicToolLoader] Failed to load tool from manifest ${manifestKey}:`, error);
-      return null;
+    // Return cached instance if available
+    if (this.toolRegistry.has(manifest.toolName)) {
+      return this.toolRegistry.get(manifest.toolName)!;
     }
+
+    const maxAttempts = parseInt(process.env.TOOL_LOADER_LOAD_RETRIES || '3', 10);
+    const baseDelayMs = parseInt(process.env.TOOL_LOADER_RETRY_DELAY_MS || '100', 10);
+    const toolFilePath = path.resolve(manifest.filePath);
+
+    for (let attempt = 1; attempt <= Math.max(1, maxAttempts); attempt++) {
+      try {
+        if (!(await fs.pathExists(toolFilePath))) {
+          logError(`[DynamicToolLoader] Tool file not found: ${toolFilePath}`);
+          return null;
+        }
+
+        const toolCode = await fs.readFile(toolFilePath, 'utf-8');
+        const tool = await this.createToolFromCode(toolCode, manifest);
+
+        if (tool) {
+          this.toolRegistry.set(manifest.toolName, tool);
+          if (attempt > 1) {
+            log(`[DynamicToolLoader] Loaded tool: ${manifest.toolName} after ${attempt} attempts`);
+          } else {
+            log(`[DynamicToolLoader] Loaded tool: ${manifest.toolName}`);
+          }
+          return tool;
+        }
+      } catch (error) {
+        logError(
+          `[DynamicToolLoader] Failed to load tool from manifest ${manifestKey} (attempt ${attempt}):`,
+          error
+        );
+        await this.updateToolMetrics(manifest, false);
+      }
+
+      if (attempt < Math.max(1, maxAttempts)) {
+        const delayMs = baseDelayMs * attempt;
+        await this.delay(delayMs);
+      }
+    }
+
+    logError(
+      `[DynamicToolLoader] Exhausted retries loading tool ${manifest.toolName} from manifest ${manifestKey}`
+    );
+    return null;
   }
 
   /**
@@ -306,7 +357,10 @@ export class DynamicToolLoader {
       `;
 
       // Use dynamic import for safe code execution
-      const tempFilePath = path.join(this.CODE_DIR, `temp_${Date.now()}_${manifest.hash}.js`);
+      const tempFilePath = path.join(
+        this.CODE_DIR,
+        `temp_${manifest.hash}_${crypto.randomUUID()}.js`
+      );
       await fs.writeFile(tempFilePath, moduleCode);
 
       try {
@@ -351,6 +405,10 @@ export class DynamicToolLoader {
       logError('[DynamicToolLoader] Failed to create tool from code:', error);
       return null;
     }
+  }
+
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**

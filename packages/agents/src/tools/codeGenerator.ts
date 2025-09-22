@@ -2,14 +2,14 @@
  * Code Generator Tool - Creates custom JavaScript tools using LLM
  */
 
-import { ChatVertexAI } from '@langchain/google-vertexai';
+import { PatchedChatVertexAI } from '../patchedVertexAI';
 import { DynamicTool } from '@langchain/core/tools';
 import { log, logError } from '@soup/common';
 import { selectTemplate } from '../templates/toolTemplates';
 import crypto from 'crypto';
 import path from 'path';
 
-interface GeneratedToolRequest {
+export interface GeneratedToolRequest {
   taskDescription: string;
   toolName: string;
   expectedInputs: Record<string, string>;
@@ -27,7 +27,7 @@ interface GeneratedToolResponse {
 }
 
 export class CodeGeneratorTool {
-  private llm: ChatVertexAI;
+  private llm: PatchedChatVertexAI;
 
   constructor() {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT;
@@ -36,7 +36,7 @@ export class CodeGeneratorTool {
       throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
     }
 
-    this.llm = new ChatVertexAI({
+    this.llm = new PatchedChatVertexAI({
       model: process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash',
       temperature: 0.3, // Lower temperature for more consistent code generation
       maxOutputTokens: 2000,
@@ -185,42 +185,23 @@ export class CodeGeneratorTool {
     expectedOutput: string,
     template: any
   ): Promise<string> {
-    const inputParamNames = Object.keys(expectedInputs);
-
-    const prompt = `You are a JavaScript code generator. Create a custom tool that follows this EXACT template and requirements.
+    const prompt = `You are a JavaScript code generator. Produce a safe, self-contained tool that can be executed as-is inside our runtime.
 
 TASK DESCRIPTION: ${taskDescription}
 
 REQUIREMENTS:
-1. Tool name must be: ${toolName}
-2. Expected inputs: ${JSON.stringify(expectedInputs, null, 2)}
-3. Expected output: ${expectedOutput}
-4. Must be completely self-contained JavaScript
-5. Must return JSON strings for all outputs
-6. Must handle all errors gracefully
-7. No external dependencies except standard Node.js/JavaScript
-8. No file system, network, or dangerous API access
-9. Follow the template structure exactly
+1. Export a constant named ${toolName} with properties { name, description, async invoke }.
+2. Ensure invoke accepts a single params object containing ${JSON.stringify(expectedInputs, null, 2)}.
+3. Produce the described output format (${expectedOutput}) and return it as JSON.stringify(...).
+4. Make the tool reusable: accept parameters instead of hard-coding values tied to this single request, and include comments when assumptions are made.
+5. Validate inputs and surface clear error messages; always catch errors.
+6. Remain self-contained (no external imports, no fs/network/process access).
+7. You may adapt the template below as needed, but the final code must work without further edits.
 
-TEMPLATE STRUCTURE TO FOLLOW:
+REFERENCE TEMPLATE (adapt freely):
 ${template.pattern}
 
-Generate the complete JavaScript code for this tool. Replace ALL template placeholders with appropriate code.
-
-Key placeholders to fill:
-- TOOL_NAME: ${toolName}
-- DESCRIPTION: Create a concise description of what this tool does
-- INPUT_PARAMS: ${inputParamNames.join(', ')}
-- Processing/logic code: Implement the actual functionality for the task
-
-The tool must:
-- Validate all inputs properly
-- Implement the core logic to accomplish the task
-- Return structured JSON responses
-- Handle errors gracefully
-- Be production-ready and safe
-
-IMPORTANT: Generate ONLY the JavaScript code, no explanations or markdown formatting:`;
+The code you return must be plain JavaScript (no markdown fences or commentary).`;
 
     const response = await this.llm.invoke(prompt);
     let generatedCode = response.content as string;
@@ -240,11 +221,17 @@ IMPORTANT: Generate ONLY the JavaScript code, no explanations or markdown format
 
   private validateGeneratedCode(code: string, expectedToolName: string): void {
     // Basic syntax checks
-    if (!code.includes(`name: '${expectedToolName}'`)) {
-      throw new Error(`Generated code must include tool name: ${expectedToolName}`);
+    const escapedToolName = this.escapeForRegex(expectedToolName);
+    const namePattern = new RegExp(String.raw`name\s*:\s*(["'])${escapedToolName}\1`);
+    if (!namePattern.test(code)) {
+      throw new Error(
+        `Generated code must include tool name property matching ${expectedToolName}`
+      );
     }
 
-    if (!code.includes('async invoke(')) {
+    const invokeRegex = /async\s+invoke\s*\(/;
+    const invokePropertyRegex = /invoke\s*:\s*async\s*\(/;
+    if (!invokeRegex.test(code) && !invokePropertyRegex.test(code)) {
       throw new Error('Generated code must include async invoke method');
     }
 
@@ -276,6 +263,10 @@ IMPORTANT: Generate ONLY the JavaScript code, no explanations or markdown format
     }
 
     log('[CodeGeneratorTool] Generated code passed validation checks');
+  }
+
+  private escapeForRegex(value: string): string {
+    return value.replace(/[\^$.*+?()[\]{}|]/g, (match) => '\\' + match);
   }
 }
 

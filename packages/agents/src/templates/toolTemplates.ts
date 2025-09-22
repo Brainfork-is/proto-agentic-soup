@@ -28,11 +28,12 @@ export const {{TOOL_NAME}} = {
       // Processing logic
       {{PROCESSING_CODE}}
       
-      return JSON.stringify({
+      const output = {
         success: true,
-        result: result,
-        processedAt: new Date().toISOString()
-      });
+        {{SUCCESS_FIELDS}}
+      };
+
+      return JSON.stringify(output);
     } catch (error) {
       const errMsg = (error && typeof error === 'object' && 'message' in (error as any))
         ? (error as any).message
@@ -54,6 +55,7 @@ module.exports = {{TOOL_NAME}};`,
       'INPUT_PARAMS',
       'VALIDATION_CODE',
       'PROCESSING_CODE',
+      'SUCCESS_FIELDS',
     ],
   },
 
@@ -71,12 +73,12 @@ export const {{TOOL_NAME}} = {
       // Mathematical operations
       {{MATH_CODE}}
       
-      return JSON.stringify({
+      const output = {
         success: true,
-        result: result,
-        calculation: '{{CALCULATION_DESCRIPTION}}',
-        computedAt: new Date().toISOString()
-      });
+        {{CALCULATION_FIELDS}}
+      };
+
+      return JSON.stringify(output);
     } catch (error) {
       const errMsg = (error && typeof error === 'object' && 'message' in (error as any))
         ? (error as any).message
@@ -92,13 +94,7 @@ export const {{TOOL_NAME}} = {
 
 // CommonJS export for runtime loader compatibility
 module.exports = {{TOOL_NAME}};`,
-    placeholders: [
-      'TOOL_NAME',
-      'DESCRIPTION',
-      'INPUT_PARAMS',
-      'MATH_CODE',
-      'CALCULATION_DESCRIPTION',
-    ],
+    placeholders: ['TOOL_NAME', 'DESCRIPTION', 'INPUT_PARAMS', 'MATH_CODE', 'CALCULATION_FIELDS'],
   },
 
   textAnalyzer: {
@@ -119,13 +115,12 @@ export const {{TOOL_NAME}} = {
       // Text analysis logic
       {{ANALYSIS_CODE}}
       
-      return JSON.stringify({
+      const output = {
         success: true,
-        originalText: text,
-        result: result,
-        analysisType: '{{ANALYSIS_TYPE}}',
-        analyzedAt: new Date().toISOString()
-      });
+        {{ANALYSIS_FIELDS}}
+      };
+
+      return JSON.stringify(output);
     } catch (error) {
       const errMsg = (error && typeof error === 'object' && 'message' in (error as any))
         ? (error as any).message
@@ -141,7 +136,7 @@ export const {{TOOL_NAME}} = {
 
 // CommonJS export for runtime loader compatibility
 module.exports = {{TOOL_NAME}};`,
-    placeholders: ['TOOL_NAME', 'DESCRIPTION', 'OTHER_PARAMS', 'ANALYSIS_CODE', 'ANALYSIS_TYPE'],
+    placeholders: ['TOOL_NAME', 'DESCRIPTION', 'OTHER_PARAMS', 'ANALYSIS_CODE', 'ANALYSIS_FIELDS'],
   },
 
   validator: {
@@ -161,13 +156,12 @@ export const {{TOOL_NAME}} = {
       
       const isValid = validationResults.every(r => r.passed);
       
-      return JSON.stringify({
+      const output = {
         success: true,
-        isValid: isValid,
-        validationResults: validationResults,
-        data: data,
-        validatedAt: new Date().toISOString()
-      });
+        {{VALIDATION_FIELDS}}
+      };
+
+      return JSON.stringify(output);
     } catch (error) {
       const errMsg = (error && typeof error === 'object' && 'message' in (error as any))
         ? (error as any).message
@@ -183,7 +177,13 @@ export const {{TOOL_NAME}} = {
 
 // CommonJS export for runtime loader compatibility
 module.exports = {{TOOL_NAME}};`,
-    placeholders: ['TOOL_NAME', 'DESCRIPTION', 'VALIDATION_PARAMS', 'VALIDATION_RULES'],
+    placeholders: [
+      'TOOL_NAME',
+      'DESCRIPTION',
+      'VALIDATION_PARAMS',
+      'VALIDATION_RULES',
+      'VALIDATION_FIELDS',
+    ],
   },
 
   formatter: {
@@ -200,17 +200,19 @@ export const {{TOOL_NAME}} = {
       // Formatting logic
       {{FORMATTING_CODE}}
       
-      return JSON.stringify({
+      const output = {
         success: true,
-        originalData: data,
-        formattedData: formattedResult,
-        formatType: '{{FORMAT_TYPE}}',
-        formattedAt: new Date().toISOString()
-      });
+        {{FORMAT_FIELDS}}
+      };
+
+      return JSON.stringify(output);
     } catch (error) {
+      const errMsg = (error && typeof error === 'object' && 'message' in (error as any))
+        ? (error as any).message
+        : 'Tool execution failed';
       return JSON.stringify({
         success: false,
-        error: error.message,
+        error: errMsg,
         toolName: '{{TOOL_NAME}}'
       });
     }
@@ -219,7 +221,7 @@ export const {{TOOL_NAME}} = {
 
 // CommonJS export for runtime loader compatibility
 module.exports = {{TOOL_NAME}};`,
-    placeholders: ['TOOL_NAME', 'DESCRIPTION', 'FORMAT_PARAMS', 'FORMATTING_CODE', 'FORMAT_TYPE'],
+    placeholders: ['TOOL_NAME', 'DESCRIPTION', 'FORMAT_PARAMS', 'FORMATTING_CODE', 'FORMAT_FIELDS'],
   },
 };
 

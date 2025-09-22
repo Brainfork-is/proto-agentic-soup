@@ -30,3 +30,5 @@ export { memoryManager } from './agentMemory';
 // Legacy exports (deprecated)
 export { jobGenerator } from './jobGenerator';
 export { LangGraphAgent } from './langgraph/LangGraphAgent';
+
+export { PatchedChatVertexAI } from './patchedVertexAI';

@@ -1163,7 +1163,19 @@ async function startAgentWorkers() {
           },
         });
 
-        return { ok: jobSucceeded, artifact: res.artifact };
+        return {
+          ok: jobSucceeded,
+          artifact: res.artifact,
+          toolsUsed: res.toolsUsed ?? false,
+          newToolsCreated: res.newToolsCreated ?? false,
+          stepsUsed: res.stepsUsed ?? 0,
+          selectedTool: res.selectedTool ?? null,
+          builderRationale: res.builderRationale ?? null,
+          executionArgs: res.executionArgs ?? null,
+          toolOutputSnippet: res.toolOutputSnippet ?? null,
+          summarySource: res.summarySource ?? null,
+          totalToolsAvailable: res.totalToolsAvailable ?? null,
+        };
       },
       {
         connection: redis,

@@ -3,7 +3,7 @@
  * Uses same Vertex AI interface as job generation
  */
 
-import { ChatVertexAI } from '@langchain/google-vertexai';
+import { PatchedChatVertexAI } from './patchedVertexAI';
 import { log, logError } from '@soup/common';
 
 export interface GradeResult {
@@ -13,7 +13,7 @@ export interface GradeResult {
 }
 
 export class LLMGrader {
-  private llm: ChatVertexAI;
+  private llm: PatchedChatVertexAI;
 
   constructor() {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT;
@@ -22,7 +22,7 @@ export class LLMGrader {
       throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
     }
 
-    this.llm = new ChatVertexAI({
+    this.llm = new PatchedChatVertexAI({
       model: process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash',
       temperature: 0.1, // Low temperature for consistent grading
       maxOutputTokens: 300, // Limited output for efficiency
@@ -37,12 +37,50 @@ export class LLMGrader {
   }
 
   async gradeResponse(jobPrompt: string, agentResponse: string): Promise<GradeResult> {
+    let parsedResponse: any = null;
+    let answerText = agentResponse;
+    let toolsUsed: unknown = [];
+    let errorFlag = false;
+    let errorDescription = '';
+
+    try {
+      const candidate = JSON.parse(agentResponse);
+      if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+        parsedResponse = candidate;
+        if (typeof candidate.answer === 'string') {
+          answerText = candidate.answer;
+        } else if (candidate.answer !== undefined) {
+          answerText = JSON.stringify(candidate.answer);
+        }
+
+        if (Array.isArray(candidate.tools_used)) {
+          toolsUsed = candidate.tools_used;
+        }
+
+        if (typeof candidate.error === 'boolean') {
+          errorFlag = candidate.error;
+        }
+
+        if (typeof candidate.error_description === 'string') {
+          errorDescription = candidate.error_description;
+        }
+      }
+    } catch {
+      // Ignore parse failures – treat as plain text response
+    }
+
+    const trimmedAnswer = (answerText || '').trim();
+
     // Quick basic checks first
-    if (!agentResponse || agentResponse.trim().length === 0) {
+    if (!trimmedAnswer) {
       return { passed: false };
     }
 
-    if (agentResponse.trim().length < 10) {
+    if (trimmedAnswer.length < 10) {
+      return { passed: false };
+    }
+
+    if (errorFlag) {
       return { passed: false };
     }
 
@@ -57,12 +95,16 @@ export class LLMGrader {
       'agent execution failed',
     ];
 
-    const lowerResponse = agentResponse.toLowerCase();
+    const lowerResponse = trimmedAnswer.toLowerCase();
     const hasErrorPhrase = errorPhrases.some((phrase) => lowerResponse.includes(phrase));
 
     if (hasErrorPhrase) {
       return { passed: false };
     }
+
+    const metadataSummary = parsedResponse
+      ? `Tools Used: ${JSON.stringify(toolsUsed)}\nError Flag: ${errorFlag}\nError Description: ${errorDescription}`
+      : 'Tools Used: []\nError Flag: false\nError Description: ';
 
     // Use LLM to evaluate quality
     try {
@@ -71,8 +113,11 @@ export class LLMGrader {
 USER REQUEST:
 ${jobPrompt}
 
-AGENT RESPONSE:
-${agentResponse}
+AGENT ANSWER:
+${trimmedAnswer}
+
+RESPONSE METADATA:
+${metadataSummary}
 
 FIRST: Determine if this is a PASS or FAIL:
 - FAIL (return pass=false, no score): Response is completely irrelevant, error message, or doesn't attempt to address the request
