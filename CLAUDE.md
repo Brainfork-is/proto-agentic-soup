@@ -184,8 +184,8 @@ LangGraph agents have access to structured tools with proper Zod schemas:
 - `packages/common/src/config.ts`: Environment configuration schema
 - `seeds/archetypes.json`: Initial agent definitions
 - `apps/soup-runner/src/main.ts`: Main orchestrator entry point
-- `packages/agents/src/langgraph/LangGraphAgent.ts`: Core agent implementation
-- `packages/agents/src/jobGenerator.ts`: Vertex AI job generation
+- `packages/agents/src/SimpleReactAgent.ts`: Core agent implementation
+- `packages/agents/src/jobGenerator.ts`: Realistic job generation
 - `.env.example`: Environment variable template
 - `docs/VERTEX_AI_CONFIGURATION.md`: Vertex AI setup guide
 

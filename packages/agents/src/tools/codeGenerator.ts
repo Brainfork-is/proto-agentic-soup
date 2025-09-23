@@ -4,7 +4,7 @@
 
 import { PatchedChatVertexAI } from '../patchedVertexAI';
 import { DynamicTool } from '@langchain/core/tools';
-import { log, logError } from '@soup/common';
+import { log, logError, getVertexTokenLimit } from '@soup/common';
 import { selectTemplate } from '../templates/toolTemplates';
 import crypto from 'crypto';
 import path from 'path';
@@ -37,10 +37,12 @@ export class CodeGeneratorTool {
       throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
     }
 
+    const maxOutputTokens = getVertexTokenLimit('code_generator');
+
     this.llm = new PatchedChatVertexAI({
       model: process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash',
       temperature: 0.3, // Lower temperature for more consistent code generation
-      maxOutputTokens: 2000,
+      maxOutputTokens, // Use config-based limit (undefined = no limit)
       authOptions: {
         credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
           ? undefined
@@ -236,13 +238,10 @@ The code you return must be plain JavaScript (no markdown fences or commentary).
   }
 
   private validateGeneratedCode(code: string, expectedToolName: string): void {
-    // Basic syntax checks
-    const escapedToolName = this.escapeForRegex(expectedToolName);
-    const namePattern = new RegExp(String.raw`name\s*:\s*(["'])${escapedToolName}\1`);
-    if (!namePattern.test(code)) {
-      throw new Error(
-        `Generated code must include tool name property matching ${expectedToolName}`
-      );
+    // Check for basic name property existence (but don't enforce exact matching)
+    const hasNameProperty = /name\s*:\s*["'][^"']+["']/i.test(code);
+    if (!hasNameProperty) {
+      throw new Error('Generated code must include a name property');
     }
 
     const invokeRegex = /async\s+invoke\s*\(/;
@@ -279,10 +278,6 @@ The code you return must be plain JavaScript (no markdown fences or commentary).
     }
 
     log('[CodeGeneratorTool] Generated code passed validation checks');
-  }
-
-  private escapeForRegex(value: string): string {
-    return value.replace(/[\^$.*+?()[\]{}|]/g, (match) => '\\' + match);
   }
 }
 

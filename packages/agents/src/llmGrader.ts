@@ -4,7 +4,7 @@
  */
 
 import { PatchedChatVertexAI } from './patchedVertexAI';
-import { log, logError } from '@soup/common';
+import { log, logError, getVertexTokenLimit } from '@soup/common';
 
 export interface GradeResult {
   passed: boolean;
@@ -22,10 +22,12 @@ export class LLMGrader {
       throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
     }
 
+    const maxOutputTokens = getVertexTokenLimit('llm_grader');
+
     this.llm = new PatchedChatVertexAI({
       model: process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash',
       temperature: 0.1, // Low temperature for consistent grading
-      maxOutputTokens: 300, // Limited output for efficiency
+      maxOutputTokens, // Use config-based limit (undefined = no limit)
       authOptions: {
         credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
           ? undefined

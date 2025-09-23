@@ -11,7 +11,7 @@ import path from 'path';
 const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
-import { createAgentForBlueprint, simpleJobGenerator, llmGrader } from '@soup/agents';
+import { createAgentForBlueprint, jobGenerator, llmGrader } from '@soup/agents';
 import { NameGenerator } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
@@ -1015,7 +1015,7 @@ async function generateJobs() {
 
   for (let i = 0; i < JOBS_PER_MIN; i++) {
     try {
-      const job = await simpleJobGenerator.generateJob();
+      const job = await jobGenerator.generateJob();
 
       // Save job to database for tracking
       const dbJob = await prisma.job.create({

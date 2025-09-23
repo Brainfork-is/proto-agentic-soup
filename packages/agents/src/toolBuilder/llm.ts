@@ -1,4 +1,4 @@
-import { logError } from '@soup/common';
+import { logError, getVertexTokenLimit } from '@soup/common';
 import { PatchedChatVertexAI } from '../patchedVertexAI';
 import { extractErrorMessage } from './utils';
 
@@ -12,7 +12,7 @@ export function createToolBuilderLLM(options?: LLMOptions): PatchedChatVertexAI 
   const projectId = process.env.GOOGLE_CLOUD_PROJECT;
   const model = process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash';
   const temperature = parseFloat(process.env.VERTEX_AI_TEMPERATURE || '0.7');
-  const maxOutputTokens = parseInt(process.env.VERTEX_AI_MAX_OUTPUT_TOKENS || '1500', 10);
+  const maxOutputTokens = getVertexTokenLimit('tool_builder');
 
   if (!projectId) {
     throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
@@ -21,7 +21,7 @@ export function createToolBuilderLLM(options?: LLMOptions): PatchedChatVertexAI 
   const llm = new PatchedChatVertexAI({
     model,
     temperature,
-    maxOutputTokens,
+    maxOutputTokens, // Use config-based limit (undefined = no limit)
     responseMimeType: options?.responseMimeType,
     authOptions: {
       credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS

@@ -8,7 +8,7 @@ import { PatchedChatVertexAI } from './patchedVertexAI';
 import { WikipediaQueryRun } from '@langchain/community/tools/wikipedia_query_run';
 import { WebBrowser } from 'langchain/tools/webbrowser';
 import { SerpAPI } from '@langchain/community/tools/serpapi';
-import { JobData, log, logError } from '@soup/common';
+import { JobData, log, logError, getVertexTokenLimit } from '@soup/common';
 
 // Agent archetype types
 export type AgentArchetype =
@@ -23,7 +23,7 @@ function createVertexAILLM() {
   const projectId = process.env.GOOGLE_CLOUD_PROJECT;
   const model = process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash';
   const temperature = parseFloat(process.env.VERTEX_AI_TEMPERATURE || '0.7');
-  const maxOutputTokens = parseInt(process.env.VERTEX_AI_MAX_OUTPUT_TOKENS || '1000');
+  const maxOutputTokens = getVertexTokenLimit('agent');
 
   if (!projectId) {
     throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
@@ -32,7 +32,7 @@ function createVertexAILLM() {
   return new PatchedChatVertexAI({
     model,
     temperature,
-    maxOutputTokens,
+    maxOutputTokens, // Use config-based limit (undefined = no limit)
     authOptions: {
       credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
         ? undefined

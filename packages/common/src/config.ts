@@ -19,6 +19,40 @@ const commonSchema = z.object({
   LLM_MAX_TOKENS_PER_HOUR: z.coerce.number().optional().default(100000),
   LLM_MAX_TOKENS_PER_AGENT: z.coerce.number().optional().default(1000),
 
+  // Vertex AI Model Configuration
+  VERTEX_AI_MODEL: z.string().optional().default('gemini-1.5-flash'),
+  VERTEX_AI_TEMPERATURE: z.coerce.number().optional().default(0.7),
+
+  // Token limits for different components (undefined = no limit)
+  VERTEX_AI_MAX_OUTPUT_TOKENS: z
+    .string()
+    .optional()
+    .transform((val) => (val === '' || val === undefined ? undefined : Number(val))), // General default
+  VERTEX_AI_MAX_OUTPUT_TOKENS_JOB_GENERATOR: z
+    .string()
+    .optional()
+    .transform((val) => (val === '' || val === undefined ? undefined : Number(val))),
+  VERTEX_AI_MAX_OUTPUT_TOKENS_TOOL_BUILDER: z
+    .string()
+    .optional()
+    .transform((val) => (val === '' || val === undefined ? undefined : Number(val))),
+  VERTEX_AI_MAX_OUTPUT_TOKENS_CODE_GENERATOR: z
+    .string()
+    .optional()
+    .transform((val) => (val === '' || val === undefined ? undefined : Number(val))),
+  VERTEX_AI_MAX_OUTPUT_TOKENS_NAME_GENERATOR: z
+    .string()
+    .optional()
+    .transform((val) => (val === '' || val === undefined ? undefined : Number(val))),
+  VERTEX_AI_MAX_OUTPUT_TOKENS_LLM_GRADER: z
+    .string()
+    .optional()
+    .transform((val) => (val === '' || val === undefined ? undefined : Number(val))),
+  VERTEX_AI_MAX_OUTPUT_TOKENS_AGENT: z
+    .string()
+    .optional()
+    .transform((val) => (val === '' || val === undefined ? undefined : Number(val))),
+
   // Local LLM configuration
   LOCAL_LLM_ENABLED: z.string().optional().default('0'),
   LOCAL_MODEL_PATH: z.string().optional().default('granite3.1-dense:8b'),
@@ -89,4 +123,36 @@ export function loadRunnerConfig(): RunnerConfig {
   const common = readEnvObject(commonSchema);
   const app = readEnvObject(runnerSchema);
   return { ...common, ...app };
+}
+
+// Helper to get the token limit for a specific component
+export type TokenLimitComponent =
+  | 'job_generator'
+  | 'tool_builder'
+  | 'code_generator'
+  | 'name_generator'
+  | 'llm_grader'
+  | 'agent';
+
+export function getVertexTokenLimit(
+  component: TokenLimitComponent,
+  config?: CommonConfig
+): number | undefined {
+  const cfg = config || readEnvObject(commonSchema);
+
+  const componentEnvMap: Record<TokenLimitComponent, keyof CommonConfig> = {
+    job_generator: 'VERTEX_AI_MAX_OUTPUT_TOKENS_JOB_GENERATOR',
+    tool_builder: 'VERTEX_AI_MAX_OUTPUT_TOKENS_TOOL_BUILDER',
+    code_generator: 'VERTEX_AI_MAX_OUTPUT_TOKENS_CODE_GENERATOR',
+    name_generator: 'VERTEX_AI_MAX_OUTPUT_TOKENS_NAME_GENERATOR',
+    llm_grader: 'VERTEX_AI_MAX_OUTPUT_TOKENS_LLM_GRADER',
+    agent: 'VERTEX_AI_MAX_OUTPUT_TOKENS_AGENT',
+  };
+
+  const componentKey = componentEnvMap[component];
+  const componentLimit = cfg[componentKey] as number | undefined;
+
+  // If component-specific limit exists, use it; otherwise fall back to general limit
+  // If neither exist, return undefined (no limit)
+  return componentLimit ?? cfg.VERTEX_AI_MAX_OUTPUT_TOKENS;
 }

@@ -1,33 +1,39 @@
 /**
- * LLM-powered job generator for creating diverse, dynamic tasks
- * Uses Vertex AI exclusively via LangChain integration
+ * Job Generator
+ * Creates realistic professional work assignments for AI agents
  */
 
 import { PatchedChatVertexAI } from './patchedVertexAI';
+import { log, logError, getVertexTokenLimit } from '@soup/common';
 
-export interface GeneratedJob {
-  category: 'web_research' | 'summarize' | 'classify' | 'math';
-  payload: any;
+export interface Job {
+  prompt: string;
   payout: number;
   deadlineS: number;
 }
 
-export class JobGenerator {
-  private agentId: string = 'job-generator';
-  private templates: Record<string, string>;
+interface JobBatch {
+  jobs: Job[];
+}
 
-  private createVertexAILLM() {
+export class JobGenerator {
+  private llm: PatchedChatVertexAI;
+  private jobQueue: Job[] = [];
+  private batchSize = 10;
+
+  constructor() {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-    const model = process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash';
 
     if (!projectId) {
       throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
     }
 
-    return new PatchedChatVertexAI({
-      model,
-      temperature: 0.8, // Higher temperature for variety
-      maxOutputTokens: 400,
+    const maxOutputTokens = getVertexTokenLimit('job_generator');
+
+    this.llm = new PatchedChatVertexAI({
+      model: process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash',
+      temperature: 0.9, // High temperature for variety
+      maxOutputTokens, // Use config-based limit (undefined = no limit)
       authOptions: {
         credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
           ? undefined
@@ -38,225 +44,148 @@ export class JobGenerator {
     });
   }
 
-  constructor() {
-    this.templates = {
-      generic: `You are a task generator creating realistic work assignments that people might give to an AI assistant. Create diverse, professional tasks that vary in type and complexity.
-
-Generate ONE of these four types of tasks randomly:
-
-1. RESEARCH TASK - Professional research questions for business/technical domains:
-   Examples: "What are the current best practices for implementing zero-trust security architecture?", "How can small businesses leverage AI for customer service automation?", "What are the key regulatory considerations for cloud data storage in healthcare?"
-
-2. SUMMARIZATION TASK - Real content that needs condensing:
-   Examples: Technical documentation, meeting notes, research findings, policy documents, product reviews, news articles
-
-3. CLASSIFICATION TASK - Realistic content categorization:
-   Examples: Customer feedback sentiment, document types, support ticket priorities, expense categories, content moderation
-
-4. CALCULATION TASK - Business math problems:
-   Examples: Budget calculations, ROI analysis, cost projections, percentage changes, financial metrics
-
-Make tasks specific and professional - the kind of work people actually delegate to assistants. Avoid generic or academic examples.
-
-Based on the task type you choose, respond with the appropriate JSON format:
-
-FOR RESEARCH: {"url": "http://localhost:4200/", "question": "specific research question"}
-FOR SUMMARIZATION: {"text": "realistic content to summarize (2-4 sentences)", "maxWords": number between 8-20}
-FOR CLASSIFICATION: {"text": "content to classify", "labels": ["option1", "option2", "option3"], "answer": "correct_option"}
-FOR CALCULATION: {"expr": "mathematical expression using +, -, *, /, parentheses only"}
-
-Choose ONE type and generate realistic, professional content for it.`,
-    };
-  }
-
-  async generateJob(): Promise<GeneratedJob> {
-    // LLM generation only - no fallback, let LLM choose the category
-    const llmJob = await this.generateLLMJob();
-    if (!llmJob) {
-      throw new Error(`Failed to generate job with LLM`);
+  async generateJob(): Promise<Job> {
+    // Return job from queue if available, otherwise generate new batch
+    if (this.jobQueue.length > 0) {
+      return this.jobQueue.shift()!;
     }
 
-    return llmJob;
+    // Generate new batch of jobs
+    await this.generateJobBatch();
+    return this.jobQueue.shift()!;
   }
 
-  private async generateLLMJob(): Promise<GeneratedJob | null> {
-    const prompt = `${this.templates.generic}
+  private async generateJobBatch(): Promise<void> {
+    // 50% chance to generate computational/tool-requiring tasks (or force via env)
+    const forceComputational = process.env.JOBS_COMPUTATIONAL_ONLY === '1';
+    const shouldGenerateComputationalTasks = forceComputational ? true : Math.random() <= 0.5;
+    const taskTypeInstruction = shouldGenerateComputationalTasks
+      ? `\n\nCOMPUTATIONAL TASK FOCUS: Include tasks involving precise calculations, data processing, and algorithmic solutions:
+- Financial calculations (ROI, compound interest, loan payments, investment analysis with specific numbers)
+- Mathematical problem solving (percentage calculations, unit conversions, multi-step formulas)
+- Data analysis and statistical calculations with provided datasets
+- Algorithm implementations (sorting given lists, searching through data, transformations)
+- Validation and verification (checking formats, validating inputs against rules)
+- Text processing (parsing structured data, formatting, pattern extraction)
+- Time-based calculations (date differences, scheduling conflicts, time zone conversions)
+- Business logic (pricing with complex rules, discount calculations, commission structures)
+- Scientific calculations (physics problems, chemistry equations, engineering computations)
 
-Make the content interesting and varied. Avoid repetition from previous generations.`;
+Focus on tasks with specific numerical inputs and expected precise outputs.`
+      : `\n\nGENERAL TASK VARIETY: Include research, writing, analysis, and planning tasks that may benefit from tool usage for data gathering and verification.`;
 
-    console.log(`[JobGenerator] Requesting realistic job from Vertex AI...`);
+    const prompt = `Generate exactly 10 realistic work assignments that people would actually delegate to a professional AI assistant. Return them in JSON format.${taskTypeInstruction}
 
-    // Use PatchedChatVertexAI directly (same config as LangGraphAgent)
-    const llm = this.createVertexAILLM();
-    const response = await llm.invoke(prompt);
+REALISM REQUIREMENTS:
+Create tasks that mirror real professional work scenarios - the kind of assignments managers, executives, entrepreneurs, researchers, and consultants actually delegate to assistants. These should feel like genuine workplace requests.
 
-    if (!response || !response.content) {
-      console.error(`[JobGenerator] Vertex AI returned null response`);
-      return null;
-    }
+PROFESSIONAL DOMAINS TO DRAW FROM:
+- Business Strategy & Analysis: Market research, competitive analysis, feasibility studies, business plan sections
+- Financial Analysis: Investment research, cost-benefit analysis, budget planning, financial modeling
+- Marketing & Sales: Campaign planning, content strategy, lead generation research, customer segmentation
+- Operations & Project Management: Process optimization, vendor research, project planning, workflow design
+- Technology & Engineering: Technical documentation, system comparisons, implementation planning, troubleshooting guides
+- Legal & Compliance: Regulatory research, policy analysis, compliance checklists, contract summaries
+- Human Resources: Recruitment planning, training program design, policy development, performance metrics
+- Product Development: Feature analysis, user research synthesis, roadmap planning, competitive feature comparison
+- Real Estate & Property: Market analysis, investment evaluation, property research, development planning
+- Healthcare & Pharmaceuticals: Research synthesis, regulatory analysis, market assessment, protocol development
+- Education & Training: Curriculum development, learning assessment, educational research, training materials
+- Consulting & Advisory: Industry analysis, recommendation frameworks, client deliverables, strategic planning
 
-    const content = response.content as string;
-    console.log(`[JobGenerator] Vertex AI response:`, content.substring(0, 200) + '...');
+TASK TYPES THAT REFLECT REAL WORK:
+- Research & Intelligence: "Research the top 5 competitors to Slack in the enterprise messaging space and analyze their pricing models"
+- Analysis & Recommendations: "Analyze our Q3 customer churn data and identify the top 3 factors contributing to cancellations"
+- Planning & Strategy: "Create a 90-day go-to-market strategy for launching our new mobile app in the European market"
+- Content & Communication: "Draft a comprehensive onboarding guide for new remote employees joining our engineering team"
+- Process & Operations: "Design a workflow for handling customer escalations that reduces response time by 50%"
+- Financial & Business: "Calculate the ROI of implementing a new CRM system for our 200-person sales team"
+- Technical & Implementation: "Create a migration plan for moving our customer database from MySQL to PostgreSQL"
+
+REALISM & AUTHENTICITY GUIDELINES:
+- Frame tasks as actual workplace assignments ("We need you to..." / "Please research..." / "Help us understand...")
+- Use real company names, products, and industry terms that professionals would recognize
+- Include realistic constraints and parameters (budgets, timelines, team sizes, specific requirements)
+- Reference actual tools, platforms, and methodologies used in business
+- Make tasks feel urgent and important, like real business priorities
+
+PROFESSIONAL LANGUAGE PATTERNS:
+- "Conduct a comprehensive analysis of..."
+- "Research and recommend the best..."
+- "Develop a strategic plan for..."
+- "Create a detailed comparison of..."
+- "Analyze the market opportunity for..."
+- "Design an implementation roadmap for..."
+- "Evaluate the feasibility of..."
+- "Prepare a business case for..."
+
+SPECIFICITY REQUIREMENTS:
+- Include actual company names, product names, and industry terminology
+- Specify realistic budgets, team sizes, timelines, and metrics
+- Reference real tools and platforms (Salesforce, HubSpot, AWS, Slack, etc.)
+- Include concrete business scenarios and challenges
+- Make all context feel authentic to actual business operations
+
+FORBIDDEN GENERIC PATTERNS:
+- Avoid academic or theoretical assignments
+- No hypothetical or made-up scenarios
+- Don't use placeholder names (Company X, Product Y)
+- Avoid overly simplified tasks that don't reflect real work complexity
+- Skip tasks that sound like textbook exercises
+
+TASK COMPLETENESS:
+- Every task should be fully self-contained with clear deliverables
+- Include all necessary context and constraints within the prompt
+- Specify the format and scope of expected outputs
+- Make tasks achievable with available tools and research capabilities
+
+CRITICAL: Respond with ONLY valid JSON in this exact format (ensure all strings are properly quoted):
+{
+  "jobs": [
+    {"prompt": "task description here", "payout": 7, "deadlineS": 60},
+    {"prompt": "another task description", "payout": 6, "deadlineS": 60}
+  ]
+}
+Generate exactly 10 jobs in the array.
+
+Payouts should be random between 5-10. 
+
+IMPORTANT: 
+- Do NOT wrap in markdown code blocks (no backticks)
+- Do NOT include any text before or after the JSON
+- Return only the raw JSON object
+- Start with { and end with }`;
 
     try {
-      // Extract JSON from response - find first complete JSON object
-      let braceCount = 0;
-      let jsonStart = -1;
-      let jsonEnd = -1;
+      log('[JobGenerator] Requesting job batch from LLM...');
 
-      for (let i = 0; i < content.length; i++) {
-        const char = content[i];
-        if (char === '{') {
-          if (jsonStart === -1) jsonStart = i;
-          braceCount++;
-        } else if (char === '}') {
-          braceCount--;
-          if (braceCount === 0 && jsonStart !== -1) {
-            jsonEnd = i;
-            break;
-          }
-        }
+      const response = await this.llm.invoke(prompt);
+      let jsonResponse = response.content as string;
+
+      // Clean up LLM response - remove markdown code blocks
+      jsonResponse = jsonResponse
+        .replace(/```json\s*/, '')
+        .replace(/```\s*$/, '')
+        .trim();
+
+      log('[JobGenerator] JSON response length:', jsonResponse.length, 'characters');
+
+      // Parse JSON response
+      const jobBatch: JobBatch = JSON.parse(jsonResponse);
+
+      if (!jobBatch.jobs || !Array.isArray(jobBatch.jobs)) {
+        throw new Error('Invalid JSON response format');
       }
 
-      if (jsonStart === -1 || jsonEnd === -1) {
-        console.error(
-          `[JobGenerator] No valid JSON found in Vertex AI response. Full response:`,
-          content
-        );
-        throw new Error('No complete JSON found in response');
-      }
+      // Add jobs to queue
+      this.jobQueue.push(...jobBatch.jobs);
 
-      const jsonStr = content.substring(jsonStart, jsonEnd + 1);
-      console.log(`[JobGenerator] Extracted JSON string:`, jsonStr);
-
-      const payload = JSON.parse(jsonStr);
-      console.log(`[JobGenerator] Parsed payload:`, JSON.stringify(payload));
-
-      // Determine category from payload structure
-      const category = this.detectCategory(payload);
-      if (!category) {
-        console.error(`[JobGenerator] Could not determine category from payload structure`);
-        console.error(`[JobGenerator] Received payload:`, JSON.stringify(payload, null, 2));
-        console.error(`[JobGenerator] Full Vertex AI response was:`, content);
-        throw new Error('Could not determine task category from payload');
-      }
-
-      // Validate payload based on detected category
-      if (!this.validatePayload(category, payload)) {
-        console.error(`[JobGenerator] Validation failed for ${category}. Expected structure:`);
-        this.logExpectedStructure(category);
-        console.error(`[JobGenerator] Received payload:`, JSON.stringify(payload, null, 2));
-        console.error(`[JobGenerator] Full Vertex AI response was:`, content);
-        throw new Error('Invalid payload structure');
-      }
-
-      console.log(`[JobGenerator] Generated realistic ${category} job`);
-
-      return {
-        category: category as GeneratedJob['category'],
-        payload,
-        payout: 5 + Math.floor(Math.random() * 6), // 5-10 credits
-        deadlineS: 60,
-      };
+      log(`[JobGenerator] Generated ${jobBatch.jobs.length} jobs in batch`);
     } catch (error) {
-      console.error(`[JobGenerator] Failed to parse LLM response:`, error);
-      console.error(`[JobGenerator] Error details:`, (error as Error).message);
-      return null;
+      logError('[JobGenerator] Failed to generate job batch:', error);
+      throw error;
     }
   }
-
-  private detectCategory(payload: any): string | null {
-    // Detect category based on payload structure
-    if (payload.url && payload.question) {
-      return 'web_research';
-    }
-    if (payload.text && payload.maxWords !== undefined) {
-      return 'summarize';
-    }
-    if (payload.text && payload.labels && payload.answer) {
-      return 'classify';
-    }
-    if (payload.expr) {
-      return 'math';
-    }
-    return null;
-  }
-
-  private logExpectedStructure(category: string): void {
-    const expectedStructures: Record<string, any> = {
-      web_research: {
-        url: 'string (must be http://localhost:4200/...)',
-        question: 'string',
-      },
-      summarize: {
-        text: 'string (2-4 sentences)',
-        maxWords: 'number (8-20)',
-      },
-      classify: {
-        text: 'string',
-        labels: 'array of strings',
-        answer: 'string (must be one of the labels)',
-      },
-      math: {
-        expr: 'string (mathematical expression with +, -, *, /, parentheses)',
-      },
-    };
-
-    console.error(
-      `[JobGenerator] Expected structure for ${category}:`,
-      JSON.stringify(expectedStructures[category], null, 2)
-    );
-  }
-
-  private validatePayload(category: string, payload: any): boolean {
-    switch (category) {
-      case 'web_research': {
-        return (
-          payload.url &&
-          payload.question &&
-          typeof payload.url === 'string' &&
-          typeof payload.question === 'string'
-        );
-      }
-
-      case 'summarize': {
-        return (
-          payload.text &&
-          payload.maxWords &&
-          typeof payload.text === 'string' &&
-          typeof payload.maxWords === 'number' &&
-          payload.maxWords > 0 &&
-          payload.maxWords <= 30
-        );
-      }
-
-      case 'classify': {
-        return (
-          payload.text &&
-          payload.labels &&
-          payload.answer &&
-          typeof payload.text === 'string' &&
-          Array.isArray(payload.labels) &&
-          payload.labels.length > 1 &&
-          payload.labels.includes(payload.answer)
-        );
-      }
-
-      case 'math': {
-        // Allow numbers, basic operations, parentheses, spaces, and decimals only
-        return (
-          payload.expr &&
-          typeof payload.expr === 'string' &&
-          /^[0-9+\-*/().\s]+$/.test(payload.expr)
-        );
-      }
-
-      default:
-        return false;
-    }
-  }
-
-  // No backup/static job generation - LLM only
 }
 
 // Singleton instance

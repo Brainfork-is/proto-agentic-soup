@@ -6,9 +6,9 @@
 export { SimpleReactAgent, createAgentForBlueprint } from './SimpleReactAgent';
 export type { AgentArchetype } from './SimpleReactAgent';
 
-// Simple job generation
-export { simpleJobGenerator } from './simpleJobGenerator';
-export type { SimpleJob } from './simpleJobGenerator';
+// Job generation
+export { jobGenerator } from './jobGenerator';
+export type { Job } from './jobGenerator';
 
 // LLM-based grading
 export { llmGrader, LLMGrader } from './llmGrader';
@@ -28,7 +28,6 @@ export { toolValidator } from './tools/toolValidator';
 export { memoryManager } from './agentMemory';
 
 // Legacy exports (deprecated)
-export { jobGenerator } from './jobGenerator';
 export { LangGraphAgent } from './langgraph/LangGraphAgent';
 
 export { PatchedChatVertexAI } from './patchedVertexAI';
