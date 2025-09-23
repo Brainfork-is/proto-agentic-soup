@@ -167,7 +167,7 @@ LangGraph agents have access to structured tools with proper Zod schemas:
 
 1. For new job types: Add grader in `apps/soup-runner/src/services/graders/` and update JobGenerator templates
 2. For new agent tools: Implement in `packages/agents/src/langgraph/tools/index.ts` with proper Zod schemas
-3. For new agent archetypes: Add to `seeds/archetypes.json`
+3. For new agent archetypes: Update archetype arrays in `apps/soup-runner/src/main.ts`
 4. For schema changes: Edit `apps/soup-runner/src/prisma/schema.prisma` and run migrations
 5. For workflow changes: Modify nodes in `packages/agents/src/langgraph/nodes/`
 
@@ -182,7 +182,6 @@ LangGraph agents have access to structured tools with proper Zod schemas:
 
 - `apps/soup-runner/src/prisma/schema.prisma`: Database schema
 - `packages/common/src/config.ts`: Environment configuration schema
-- `seeds/archetypes.json`: Initial agent definitions
 - `apps/soup-runner/src/main.ts`: Main orchestrator entry point
 - `packages/agents/src/SimpleReactAgent.ts`: Core agent implementation
 - `packages/agents/src/jobGenerator.ts`: Realistic job generation

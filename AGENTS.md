@@ -6,7 +6,7 @@
   - `apps/`: runnable services — `browser-gateway` (Playwright gateway), `site-kb` (static KB), `soup-runner` (agents + jobs + Prisma).
   - `packages/`: shared libraries — `common`, `agents`.
   - `infra/`: Ops and utilities (historical). Redis is expected to run locally.
-  - `docs/`: specs and tickets; `seeds/`: data archetypes.
+  - `docs/`: specs and tickets.
 - Source lives under `src/`; builds output to `dist/` (entrypoints like `src/main.ts`).
 
 ## Build, Test, and Development Commands

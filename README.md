@@ -99,7 +99,6 @@ Notes:
   - `agents/`: SimpleAgent (temporary) + tool adapters (`browserRun`, `stringKit`, `calc`, `retrieval`). Will be refactored to LangGraph.js + LangChain.js.
 - `infra/`: (legacy) Docker files; Redis is expected to run locally now
 - `docs/`: spec and tickets (`tech-spec.md`, `tickets.md`)
-- `seeds/`: archetypes for initial agent population
 
 ## Code Style & Formatting
 

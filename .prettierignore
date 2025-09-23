@@ -22,5 +22,4 @@ LICENSE
 eslint.config.js
 .github/
 docs/
-seeds/
 *.prisma

@@ -868,10 +868,6 @@ async function seedIfEmpty() {
     return;
   }
 
-  const seeds = JSON.parse(
-    fs.readFileSync(path.join(__dirname, '../../../seeds', 'archetypes.json'), 'utf8')
-  );
-
   // Create agents with tool-based archetypes (matching SimpleReactAgent types)
   const TEST_TOOL_BUILDER_ONLY = process.env.TEST_TOOL_BUILDER_ONLY === '1';
   const agentArchetypes = TEST_TOOL_BUILDER_ONLY
@@ -886,23 +882,14 @@ async function seedIfEmpty() {
     `[seed] Creating ${totalAgents} agents from ${agentArchetypes.length} archetypes${TEST_TOOL_BUILDER_ONLY ? ' (TOOL-BUILDER TEST MODE)' : ''}...`
   );
 
-  // First, collect all agent configurations for batch name generation
+  // Create simple agent configurations
   const agentConfigs = [];
   for (let archetypeIndex = 0; archetypeIndex < agentArchetypes.length; archetypeIndex++) {
     const archetypeType = agentArchetypes[archetypeIndex];
-    const baseArchetype = seeds.agents[archetypeIndex % seeds.agents.length];
 
     for (let variant = 0; variant < variantsPerArchetype; variant++) {
-      const mutatedTemperature = mutateTemperature(baseArchetype.temperature, variant);
-      const mutatedTools = mutateTools(baseArchetype.tools, variant);
-      const mutatedCoopThreshold = mutateCoopThreshold(baseArchetype.coopThreshold, variant);
-
       agentConfigs.push({
         archetypeType,
-        baseArchetype,
-        mutatedTemperature,
-        mutatedTools,
-        mutatedCoopThreshold,
       });
     }
   }
@@ -912,8 +899,8 @@ async function seedIfEmpty() {
   const names = await nameGenerator.generateNames(
     agentConfigs.map((config) => ({
       archetype: config.archetypeType,
-      temperature: config.mutatedTemperature,
-      tools: config.mutatedTools,
+      temperature: 0.3, // Default temperature
+      tools: [], // Tools are determined by archetype
     }))
   );
 
@@ -922,15 +909,15 @@ async function seedIfEmpty() {
     const config = agentConfigs[i];
     const agentName = names[i];
 
-    // Create blueprint for this specialized archetype variant
+    // Create blueprint for this archetype
     const blueprint = await prisma.blueprint.create({
       data: {
         version: 1,
-        llmModel: config.baseArchetype.llmModel,
-        temperature: config.mutatedTemperature,
-        tools: config.mutatedTools.join(','),
+        llmModel: 'gemini-1.5-flash',
+        temperature: 0.3,
+        tools: '', // Tools are determined by archetype implementation
         archetype: config.archetypeType,
-        coopThreshold: config.mutatedCoopThreshold,
+        coopThreshold: 0.5,
         minBalance: 30,
         mutationRate: 0.15,
         maxOffspring: 2,
@@ -951,61 +938,10 @@ async function seedIfEmpty() {
       },
     });
 
-    log(
-      `[seed] Created "${agentName.fullName}": archetype=${config.archetypeType}, temp=${config.mutatedTemperature.toFixed(2)}, tools=[${config.mutatedTools.join(',')}]`
-    );
+    log(`[seed] Created "${agentName.fullName}": archetype=${config.archetypeType}`);
   }
 
   log(`[seed] Seeding complete: ${totalAgents} agents created`);
-}
-
-// Mutation functions for creating variants
-function mutateTemperature(baseTemp: number, variant: number): number {
-  // Create temperature variants: 0.1, 0.2, 0.3, 0.4, 0.5, then some repeats
-  const temps = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
-  return temps[variant] || baseTemp;
-}
-
-function mutateTools(baseTools: string[], variant: number): string[] {
-  const allTools = ['browser', 'retrieval', 'stringKit', 'calc'];
-  const tools = [...baseTools];
-
-  // Apply different tool mutations based on variant
-  switch (variant % 4) {
-    case 0: // Original tools
-      break;
-    case 1: {
-      // Add a random tool if not present
-      const addTool = allTools[Math.floor(Math.random() * allTools.length)];
-      if (!tools.includes(addTool)) tools.push(addTool);
-      break;
-    }
-    case 2: {
-      // Remove a random tool if more than 1 tool
-      if (tools.length > 1) {
-        const removeIndex = Math.floor(Math.random() * tools.length);
-        tools.splice(removeIndex, 1);
-      }
-      break;
-    }
-    case 3: {
-      // Swap a tool
-      if (tools.length > 0) {
-        const swapIndex = Math.floor(Math.random() * tools.length);
-        const newTool = allTools[Math.floor(Math.random() * allTools.length)];
-        tools[swapIndex] = newTool;
-      }
-      break;
-    }
-  }
-
-  return [...new Set(tools)]; // Remove duplicates
-}
-
-function mutateCoopThreshold(baseThreshold: number, variant: number): number {
-  // Create cooperation threshold variants
-  const thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
-  return thresholds[variant] || baseThreshold;
 }
 
 async function generateJobs() {
