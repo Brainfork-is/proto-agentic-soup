@@ -47,11 +47,43 @@ async function fetchJobsWithStatus(limit?: number): Promise<JobExportData[]> {
 
   log(`Found ${jobs.length} jobs in database`);
 
+  // Build a map of Redis job results for efficient batch lookup
+  const redisResultsMap = new Map<string, any>();
+
   let redis: IORedis | null = null;
   try {
     redis = await getRedis();
+
+    if (redis) {
+      log('Fetching job results from Redis...');
+      const completedJobs = await redis.zrange('bull:jobs:completed', 0, -1);
+      const failedJobs = await redis.zrange('bull:jobs:failed', 0, -1);
+
+      // Batch fetch all job data
+      const allJobIds = [...completedJobs, ...failedJobs];
+      for (const redisJobId of allJobIds) {
+        try {
+          const [dataRaw, returnRaw] = await redis.hmget(
+            `bull:jobs:${redisJobId}`,
+            'data',
+            'returnvalue'
+          );
+
+          if (dataRaw) {
+            const jobData = JSON.parse(dataRaw);
+            if (jobData.dbJobId && returnRaw) {
+              const returnValue = JSON.parse(returnRaw);
+              redisResultsMap.set(jobData.dbJobId, returnValue);
+            }
+          }
+        } catch (err) {
+          // Skip invalid entries
+        }
+      }
+      log(`Found ${redisResultsMap.size} job results in Redis`);
+    }
   } catch (error) {
-    logError('Warning: Could not connect to Redis, status will be approximate:', error);
+    logError('Warning: Could not connect to Redis, results will be empty:', error);
   }
 
   const exportData: JobExportData[] = [];
@@ -75,44 +107,136 @@ async function fetchJobsWithStatus(limit?: number): Promise<JobExportData[]> {
     });
 
     if (ledgerEntry) {
-      agentId = ledgerEntry.agentId;
       status = ledgerEntry.reason === 'payout' ? 'completed' : 'failed';
       qualityGrade = ledgerEntry.qualityGrade || undefined;
       completedAt = ledgerEntry.ts.toISOString();
 
-      // Get agent archetype from blueprint
-      const agent = await prisma.agentState.findUnique({
-        where: { id: ledgerEntry.agentId },
-      });
-
-      if (agent) {
-        const blueprint = await prisma.blueprint.findUnique({
-          where: { id: agent.blueprintId },
+      // Handle both individual agents and swarms
+      if (ledgerEntry.agentId) {
+        // Individual agent
+        agentId = ledgerEntry.agentId;
+        const agent = await prisma.agentState.findUnique({
+          where: { id: ledgerEntry.agentId },
         });
-        agentArchetype = blueprint?.archetype;
+
+        if (agent) {
+          if (agent.blueprintId) {
+            // Traditional agent with blueprint
+            const blueprint = await prisma.blueprint.findUnique({
+              where: { id: agent.blueprintId },
+            });
+            agentArchetype = blueprint?.archetype;
+          } else {
+            // Swarm member agent with archetype stored directly
+            agentArchetype = agent.archetype || undefined;
+          }
+        }
+      } else if (ledgerEntry.swarmId) {
+        // Swarm-level transaction
+        agentId = ledgerEntry.swarmId;
+        const swarm = await prisma.swarm.findUnique({
+          where: { id: ledgerEntry.swarmId },
+        });
+        agentArchetype = swarm ? 'swarm' : 'unknown';
       }
     }
 
-    // Try to get job result from Redis for additional details
-    if (redis && status !== 'pending') {
-      try {
-        const completedJobs = await redis.zrange('bull:jobs:completed', 0, -1);
-        const failedJobs = await redis.zrange('bull:jobs:failed', 0, -1);
+    // Get job result from pre-fetched Redis map
+    if (redisResultsMap.has(job.id)) {
+      const returnValue = redisResultsMap.get(job.id);
+      if (returnValue) {
+        // Handle nested artifact structures (common in tool-builder and swarm results)
+        let artifactToProcess = returnValue.artifact;
 
-        for (const redisJobId of [...completedJobs, ...failedJobs]) {
-          const redisJob = await redis.hgetall(`bull:jobs:${redisJobId}`);
-          if (redisJob && redisJob.data) {
-            const jobData = JSON.parse(redisJob.data);
-            if (jobData.dbJobId === job.id && redisJob.returnvalue) {
-              const returnValue = JSON.parse(redisJob.returnvalue);
-              result = returnValue.artifact || 'No result';
-              stepsUsed = returnValue.stepsUsed || 0;
-              break;
+        // If artifact itself is an object with an artifact property, use the nested one
+        if (
+          artifactToProcess &&
+          typeof artifactToProcess === 'object' &&
+          artifactToProcess.artifact
+        ) {
+          artifactToProcess = artifactToProcess.artifact;
+        }
+
+        // Handle different result formats
+        if (typeof artifactToProcess === 'string') {
+          try {
+            // Try to parse if it's a JSON string
+            const parsed = JSON.parse(artifactToProcess);
+            if (parsed.answer) {
+              result = parsed.answer;
+            } else {
+              result = artifactToProcess;
             }
+          } catch {
+            result = artifactToProcess;
+          }
+        } else if (artifactToProcess && typeof artifactToProcess === 'object') {
+          if (artifactToProcess.answer) {
+            result = artifactToProcess.answer;
+          } else {
+            result = JSON.stringify(artifactToProcess);
+          }
+        } else if (returnValue.answer) {
+          // Direct answer format
+          result =
+            typeof returnValue.answer === 'string'
+              ? returnValue.answer
+              : JSON.stringify(returnValue.answer);
+        } else {
+          result = 'No result';
+        }
+
+        // Clean up excessive whitespace to prevent massive CSV files
+        if (result) {
+          const originalLength = result.length;
+
+          // First handle excessive spaces within lines
+          result = result.replace(/ {100,}/g, ' '); // Replace 100+ spaces with single space
+
+          // Then handle line-level whitespace
+          const hasParaBreaks = result.includes('\n\n');
+          result = result
+            .split('\n')
+            .map((line) => line.trim()) // Trim whitespace from each line
+            .filter((line) => line.length > 0 || hasParaBreaks) // Keep empty lines only if there are paragraph breaks
+            .join('\n')
+            .replace(/\n{3,}/g, '\n\n') // Replace 3+ newlines with just 2
+            .trim(); // Remove leading/trailing whitespace
+
+          // Log if we removed significant whitespace
+          if (originalLength > 100000 && result.length < originalLength / 2) {
+            logError(
+              `[Export] Cleaned result whitespace: ${originalLength} -> ${result.length} chars for job ${job.id}`
+            );
+          }
+
+          // Only truncate if still too large after cleanup
+          if (result.length > 100000) {
+            result = result.substring(0, 100000) + '\n... [truncated due to size]';
           }
         }
-      } catch (error) {
-        logError(`Error fetching Redis data for job ${job.id}:`, error);
+
+        // Get stepsUsed from nested or top level
+        stepsUsed =
+          (returnValue.artifact && returnValue.artifact.stepsUsed) || returnValue.stepsUsed || 0;
+
+        // Include tool usage info if available
+        const toolsUsed =
+          (returnValue.artifact && returnValue.artifact.toolsUsed) || returnValue.toolsUsed;
+        const selectedTool =
+          (returnValue.artifact && returnValue.artifact.selectedTool) || returnValue.selectedTool;
+        const newToolsCreated =
+          (returnValue.artifact && returnValue.artifact.newToolsCreated) ||
+          returnValue.newToolsCreated;
+
+        if (toolsUsed || selectedTool) {
+          const toolInfo = [];
+          if (selectedTool) toolInfo.push(`Tool: ${selectedTool}`);
+          if (newToolsCreated) toolInfo.push('New tool created');
+          if (toolInfo.length > 0) {
+            result = `${result} [${toolInfo.join(', ')}]`;
+          }
+        }
       }
     }
 

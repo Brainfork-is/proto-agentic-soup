@@ -24,6 +24,10 @@ export { codeGeneratorTool } from './tools/codeGenerator';
 export { dynamicToolLoader } from './tools/dynamicToolLoader';
 export { toolValidator } from './tools/toolValidator';
 
+// Swarm Agent
+export { SwarmAgent, createSwarmAgent } from './SwarmAgent';
+export type { SwarmConfig, SwarmMember } from './SwarmAgent';
+
 // Core utilities (kept for compatibility)
 export { memoryManager } from './agentMemory';
 

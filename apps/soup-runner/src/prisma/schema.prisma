@@ -21,10 +21,31 @@ model Blueprint {
   createdAt     DateTime @default(now())
 }
 
+model Swarm {
+  id          String   @id @default(cuid())
+  name        String   // Fantasy-style swarm name like "The Crimson Collective"
+  description String?  // Optional description
+  balance     Int      @default(0)  // Swarm-level balance
+  reputation  Float    @default(0.5) // Swarm-level reputation
+  attempts    Int      @default(0)   // Total job attempts
+  wins        Int      @default(0)   // Total successful jobs
+  meanTtcSec  Int      @default(0)   // Mean time to completion
+  alive       Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  lastBeat    DateTime @default(now())
+
+  // Relations
+  agents      AgentState[]
+  jobs        Job[]
+  ledgerEntries Ledger[]
+}
+
 model AgentState {
   id          String   @id @default(cuid())
-  blueprintId String
+  blueprintId String?  // Optional for swarm agents
+  swarmId     String?  // Reference to swarm (nullable for backward compatibility)
   name        String?  // Fantasy-style name like "Zephyr the Code-Weaver"
+  archetype   String?  // Agent archetype (llm-only, web-browser, etc.) - stored directly for swarm agents
   balance     Int
   reputation  Float
   attempts    Int
@@ -32,6 +53,9 @@ model AgentState {
   meanTtcSec  Int
   alive       Boolean  @default(true)
   lastBeat    DateTime @default(now())
+
+  // Relations
+  swarm       Swarm?   @relation(fields: [swarmId], references: [id])
 }
 
 model Job {
@@ -40,17 +64,26 @@ model Job {
   payload   String
   payout    Int
   deadlineS Int
+  swarmId   String?  // Reference to assigned swarm (nullable for backward compatibility)
+  agentId   String?  // Reference to individual agent (for backward compatibility)
   createdAt DateTime @default(now())
+
+  // Relations
+  swarm     Swarm?   @relation(fields: [swarmId], references: [id])
 }
 
 model Ledger {
   id           String   @id @default(cuid())
-  agentId      String
+  agentId      String?  // Individual agent (for backward compatibility)
+  swarmId      String?  // Swarm-level transaction
   jobId        String?  // Optional job ID for tracking which job this transaction relates to
   delta        Int
   reason       String
   qualityGrade Int?     // Quality score 0-100 for successful jobs
   ts           DateTime @default(now())
+
+  // Relations
+  swarm        Swarm?   @relation(fields: [swarmId], references: [id])
 }
 
 model Edge {

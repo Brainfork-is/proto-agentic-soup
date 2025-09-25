@@ -237,7 +237,7 @@ The code you return must be plain JavaScript (no markdown fences or commentary).
     return generatedCode;
   }
 
-  private validateGeneratedCode(code: string, expectedToolName: string): void {
+  private validateGeneratedCode(code: string, _expectedToolName: string): void {
     // Check for basic name property existence (but don't enforce exact matching)
     const hasNameProperty = /name\s*:\s*["'][^"']+["']/i.test(code);
     if (!hasNameProperty) {

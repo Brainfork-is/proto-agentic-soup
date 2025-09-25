@@ -9,6 +9,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import IORedis from 'ioredis';
+import { log } from '@soup/common';
 
 async function getRedis(): Promise<IORedis | null> {
   try {
@@ -47,6 +48,48 @@ async function main() {
       select: { id: true },
     });
     const tbAgentIds = tbAgents.map(({ id }: { id: string }) => id);
+
+    // Early exit if no tool-builder agents (e.g., in swarm-only runs)
+    if (tbAgentIds.length === 0) {
+      log('[summarize-run] No tool-builder agents found, returning minimal summary');
+
+      const jobsInWindow = await prisma.job.count({ where: { createdAt: { gte: windowStart } } });
+
+      const summary = {
+        windowMinutes: minutes,
+        timeStart: windowStart.toISOString(),
+        toolBuilderAgents: 0,
+        jobsCreated: jobsInWindow,
+        payouts: 0,
+        fails: 0,
+        succeededJobs: 0,
+        avgQuality: null,
+        browserStepCost: 0,
+        toolsCreated: 0,
+        recentTools: [],
+        toolUsage: {
+          totalTrackedJobs: 0,
+          withTelemetry: 0,
+          toolRuns: {
+            total: 0,
+            successRatePct: null,
+            newToolsUsed: 0,
+          },
+          plannerOnly: {
+            total: 0,
+            successRatePct: null,
+            reportedNewTools: 0,
+          },
+          unknown: {
+            total: 0,
+            successRatePct: null,
+          },
+        },
+      };
+
+      console.log(JSON.stringify(summary, null, 2));
+      return;
+    }
 
     // Jobs during window
     const jobsInWindow = await prisma.job.count({ where: { createdAt: { gte: windowStart } } });
@@ -98,36 +141,71 @@ async function main() {
     const redis = await getRedis();
     if (redis && toolJobIds.length > 0) {
       try {
+        log(`[summarize-run] Looking up Redis data for ${toolJobIds.length} jobs`);
         const jobIdSet = new Set(toolJobIds);
         const completed = await redis.zrange('bull:jobs:completed', 0, -1);
         const failed = await redis.zrange('bull:jobs:failed', 0, -1);
         const allProcessed = [...completed, ...failed];
 
-        for (const bullJobId of allProcessed) {
-          try {
-            const dataRaw = await redis.hget(`bull:jobs:${bullJobId}`, 'data');
-            if (!dataRaw) continue;
-            const parsedData = JSON.parse(dataRaw);
-            const dbJobId: string | undefined = parsedData?.dbJobId;
-            if (!dbJobId || !jobIdSet.has(dbJobId)) continue;
+        // Batch fetch all job data to avoid O(n²) performance
+        const batchSize = 100;
+        let processed = 0;
 
-            const returnRaw = await redis.hget(`bull:jobs:${bullJobId}`, 'returnvalue');
-            if (!returnRaw) continue;
-            const parsedReturn = JSON.parse(returnRaw);
-            usageMap.set(dbJobId, {
-              toolsUsed: Boolean(parsedReturn?.toolsUsed),
-              newToolsCreated: Boolean(parsedReturn?.newToolsCreated),
-              selectedTool:
-                typeof parsedReturn?.selectedTool === 'string' ? parsedReturn.selectedTool : null,
-            });
+        for (let i = 0; i < allProcessed.length; i += batchSize) {
+          const batch = allProcessed.slice(i, i + batchSize);
 
-            if (usageMap.size === jobIdSet.size) {
-              break;
+          // Batch fetch data and returnvalue for this batch
+          const batchPromises = batch.map(async (bullJobId) => {
+            try {
+              const [dataRaw, returnRaw] = await redis.hmget(
+                `bull:jobs:${bullJobId}`,
+                'data',
+                'returnvalue'
+              );
+
+              if (!dataRaw) return null;
+              const parsedData = JSON.parse(dataRaw);
+              const dbJobId: string | undefined = parsedData?.dbJobId;
+              if (!dbJobId || !jobIdSet.has(dbJobId)) return null;
+
+              if (!returnRaw) return null;
+              const parsedReturn = JSON.parse(returnRaw);
+              return {
+                dbJobId,
+                data: {
+                  toolsUsed: Boolean(parsedReturn?.toolsUsed),
+                  newToolsCreated: Boolean(parsedReturn?.newToolsCreated),
+                  selectedTool:
+                    typeof parsedReturn?.selectedTool === 'string'
+                      ? parsedReturn.selectedTool
+                      : null,
+                },
+              };
+            } catch (err) {
+              return null;
             }
-          } catch (err) {
-            console.warn('[summarize-run] Failed to parse Bull job payload:', err);
+          });
+
+          const batchResults = await Promise.all(batchPromises);
+          for (const result of batchResults) {
+            if (result) {
+              usageMap.set(result.dbJobId, result.data);
+            }
+          }
+
+          processed += batch.length;
+          if (processed % 1000 === 0) {
+            log(`[summarize-run] Processed ${processed}/${allProcessed.length} Redis jobs`);
+          }
+
+          // Early exit if we found all jobs we need
+          if (usageMap.size === jobIdSet.size) {
+            log(`[summarize-run] Found all ${usageMap.size} jobs, stopping early`);
+            break;
           }
         }
+
+        log(`[summarize-run] Found Redis data for ${usageMap.size}/${toolJobIds.length} jobs`);
       } finally {
         await redis.quit();
       }

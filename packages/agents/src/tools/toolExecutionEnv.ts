@@ -6,6 +6,7 @@
 import { log, logError } from '@soup/common';
 import * as vm from 'vm';
 import * as path from 'path';
+import * as fs from 'fs';
 // Note: PatchedChatVertexAI import removed as WebBrowser functionality is not currently used
 
 // List of allowed npm packages that tools can use
@@ -26,7 +27,31 @@ const ALLOWED_PACKAGES = [
   'marked',
   'dompurify',
   'jsdom',
+  'pdf-lib',
 ];
+
+// Path to the blocked packages log file
+const BLOCKED_PACKAGES_LOG = path.join(__dirname, '../generated-tools/blocked-packages.log');
+
+// Function to log blocked package attempts to a dedicated file
+function logBlockedPackage(packageName: string) {
+  try {
+    const timestamp = new Date().toISOString();
+    const logEntry = `${timestamp} - BLOCKED: "${packageName}"\n`;
+
+    // Ensure directory exists
+    const logDir = path.dirname(BLOCKED_PACKAGES_LOG);
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+
+    // Append to log file
+    fs.appendFileSync(BLOCKED_PACKAGES_LOG, logEntry);
+  } catch (error) {
+    // Don't fail tool execution if logging fails
+    logError('[ToolEnv] Failed to log blocked package:', error);
+  }
+}
 
 // Simple web research using axios and search engines
 async function performWebSearch(query: string): Promise<string> {
@@ -107,7 +132,11 @@ export function createToolContext(): vm.Context {
     process: { env: {} }, // Limited process object
     // Provide require function for allowed packages
     require: (packageName: string) => {
+      // Log all package usage attempts for whitelist management
+      log(`[ToolEnv] Tool attempting to require package: "${packageName}"`);
+
       if (ALLOWED_PACKAGES.includes(packageName)) {
+        log(`[ToolEnv] Package "${packageName}" is whitelisted, allowing access`);
         try {
           // Try to require from the generated-tools node_modules first
           const packagePath = path.join(__dirname, '../generated-tools/node_modules', packageName);
@@ -133,6 +162,12 @@ export function createToolContext(): vm.Context {
           }
         }
       }
+
+      // Log blocked packages for potential whitelist expansion
+      logBlockedPackage(packageName);
+      logError(
+        `[ToolEnv] BLOCKED PACKAGE: "${packageName}" - Consider adding to ALLOWED_PACKAGES if safe`
+      );
       throw new Error(`Package ${packageName} is not allowed in tool execution environment`);
     },
     // Web research function

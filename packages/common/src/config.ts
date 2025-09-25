@@ -94,6 +94,15 @@ const runnerSchema = z.object({
     .optional()
     .default('0')
     .transform((v) => v === '1'),
+
+  // Swarm configuration
+  USE_SWARMS: z
+    .union([z.literal('1'), z.literal('0')])
+    .optional()
+    .default('0')
+    .transform((v) => v === '1'), // Whether to use swarms instead of individual agents
+  SWARM_COUNT: z.coerce.number().optional().default(5), // Number of swarms to create
+  AGENTS_PER_SWARM: z.coerce.number().optional().default(3), // Number of agents per swarm
   MCP_KNOWLEDGE_SERVER: z.string().optional().default(''),
   MCP_BEARER_TOKEN: z.string().optional().default(''),
 });

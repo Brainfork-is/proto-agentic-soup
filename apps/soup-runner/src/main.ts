@@ -2,7 +2,6 @@ import Fastify from 'fastify';
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 // Prisma is imported dynamically to avoid requiring a generated client in bootstrap mode
-// import { PrismaClient } from '@prisma/client';
 import { gini, topKShare, loadRunnerConfig, log, logError } from '@soup/common';
 import fs from 'fs-extra';
 import path from 'path';
@@ -11,41 +10,246 @@ import path from 'path';
 const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
-import { createAgentForBlueprint, jobGenerator, llmGrader } from '@soup/agents';
+import { createAgentForBlueprint, jobGenerator, llmGrader, createSwarmAgent } from '@soup/agents';
 import { NameGenerator } from '@soup/agents';
+import type { SwarmConfig } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
 // Initialize name generator
 const nameGenerator = new NameGenerator();
 
 const app = Fastify();
+
+// Add CORS headers
+app.addHook('preHandler', async (request, reply) => {
+  reply.header('Access-Control-Allow-Origin', '*');
+  reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  // Handle preflight requests
+  if (request.method === 'OPTIONS') {
+    return reply.status(200).send();
+  }
+});
 let redis: any;
 let prisma: any;
 
 const JOBS_PER_MIN = cfg.JOBS_PER_MIN;
 const EPOCH_MINUTES = cfg.EPOCH_MINUTES;
 const FAIL_PENALTY = cfg.FAIL_PENALTY;
-// const STEP_COST = cfg.BROWSER_STEP_COST;
 
 const RUN_DIR = path.join(process.cwd(), 'runs', String(Date.now()));
 const METRICS_DIR = path.join(RUN_DIR, 'metrics');
-// const DEBUG_LOG_FILE = path.join(process.cwd(), 'debug.log');
 fs.ensureDirSync(METRICS_DIR);
 
 // Debug logging functionality removed - using console.log directly
 
+// System control state
+let systemState: {
+  status: 'running' | 'paused';
+  startedAt: Date | null;
+  pausedAt: Date | null;
+} = {
+  status: 'paused', // 'running', 'paused' - start paused to allow setup without processing
+  startedAt: null,
+  pausedAt: new Date(), // Set paused timestamp on startup
+};
+
+// Workers and intervals to control
+let jobWorkers: Worker[] = [];
+let jobGeneratorInterval: ReturnType<typeof setInterval> | null = null;
+let metricsInterval: ReturnType<typeof setInterval> | null = null;
+
+// System control endpoints
+app.post('/api/system/start', async (_request, _reply) => {
+  if (systemState.status === 'running') {
+    return { success: false, message: 'System is already running' };
+  }
+
+  try {
+    systemState = {
+      status: 'running',
+      startedAt: new Date(),
+      pausedAt: null,
+    };
+
+    // Start or resume job generation and workers with timeout
+    const startPromise = startSystemProcesses();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Start process timed out after 30 seconds')), 30000)
+    );
+
+    await Promise.race([startPromise, timeoutPromise]);
+
+    log('[System] Started soup runner system');
+    return { success: true, message: 'System started successfully', status: systemState };
+  } catch (error) {
+    systemState.status = 'paused';
+    systemState.pausedAt = new Date();
+    logError('[System] Failed to start system:', error);
+    return { success: false, message: `Failed to start: ${(error as Error).message}` };
+  }
+});
+
+app.post('/api/system/pause', async (_request, _reply) => {
+  if (systemState.status !== 'running') {
+    return { success: false, message: 'System is not currently running' };
+  }
+
+  try {
+    systemState.status = 'paused';
+    systemState.pausedAt = new Date();
+
+    // Stop all workers and intervals
+    await stopSystemProcesses();
+
+    log('[System] Paused soup runner system');
+    return { success: true, message: 'System paused successfully', status: systemState };
+  } catch (error) {
+    logError('[System] Failed to pause system:', error);
+    return { success: false, message: `Failed to pause: ${(error as Error).message}` };
+  }
+});
+
+app.post('/api/system/reset', async (_request, _reply) => {
+  try {
+    // Stop the system first
+    await stopSystemProcesses();
+
+    // Reset database (clear agents, jobs, ledger, swarms)
+    if (!BOOTSTRAP && prisma) {
+      log('[System] Resetting database...');
+      await prisma.ledger.deleteMany({});
+      await prisma.agentState.deleteMany({});
+      await prisma.swarm.deleteMany({});
+      await prisma.job.deleteMany({});
+      await prisma.blueprint.deleteMany({});
+      log('[System] Database reset complete');
+
+      // Reseed the database with new agents/swarms
+      log('[System] Reseeding agents and swarms...');
+      await seedIfEmpty();
+      log('[System] Reseeding complete');
+    }
+
+    // Reset system state
+    systemState = {
+      status: 'paused',
+      startedAt: null,
+      pausedAt: new Date(),
+    };
+
+    log('[System] Reset soup runner system');
+    return {
+      success: true,
+      message: 'System reset and reseeded successfully',
+      status: systemState,
+    };
+  } catch (error) {
+    logError('[System] Failed to reset system:', error);
+    return { success: false, message: `Failed to reset: ${(error as Error).message}` };
+  }
+});
+
+app.get('/api/system/status', async (_request, _reply) => {
+  return {
+    success: true,
+    status: systemState,
+    uptime: systemState.startedAt ? Date.now() - systemState.startedAt.getTime() : 0,
+    processes: {
+      jobWorkers: jobWorkers.length,
+      jobGeneratorActive: jobGeneratorInterval !== null,
+      metricsActive: metricsInterval !== null,
+    },
+  };
+});
+
+async function startSystemProcesses() {
+  log('[System] Starting job generation and worker processes...');
+
+  try {
+    // Start job generation interval
+    if (!jobGeneratorInterval) {
+      jobGeneratorInterval = setInterval(generateJobs, 60_000);
+      generateJobs().catch(console.error); // Generate first batch immediately
+    }
+
+    // Start agent workers with error handling
+    log('[System] Starting agent workers...');
+    await startAgentWorkers();
+    log('[System] Agent workers started successfully');
+
+    // Start metrics collection interval
+    if (!metricsInterval) {
+      metricsInterval = setInterval(() => epochTick().catch(console.error), EPOCH_MINUTES * 60_000);
+    }
+
+    log('[System] All processes started successfully');
+  } catch (error) {
+    logError('[System] Error in startSystemProcesses:', error);
+    throw error; // Re-throw to be caught by the API handler
+  }
+}
+
+async function stopSystemProcesses() {
+  // Stop job generator
+  if (jobGeneratorInterval) {
+    clearInterval(jobGeneratorInterval);
+    jobGeneratorInterval = null;
+  }
+
+  // Stop metrics collection
+  if (metricsInterval) {
+    clearInterval(metricsInterval);
+    metricsInterval = null;
+  }
+
+  // Close all workers
+  for (const worker of jobWorkers) {
+    try {
+      await worker.close();
+    } catch (error) {
+      logError('[System] Error closing worker:', error);
+    }
+  }
+  jobWorkers = [];
+
+  log('[System] All system processes stopped');
+}
+
 app.get('/leaderboard', async () => {
-  const s = await prisma.agentState.findMany();
-  const rows = s
-    .map((x: any) => ({
-      agentId: x.id,
-      balance: x.balance,
-      wins: x.wins,
-      attempts: x.attempts,
-    }))
-    .sort((a: any, b: any) => b.balance - a.balance)
-    .slice(0, 20);
-  return { rows };
+  const USE_SWARMS = cfg.USE_SWARMS;
+
+  if (USE_SWARMS) {
+    // Show swarm leaderboard
+    const swarms = await prisma.swarm.findMany();
+    const rows = swarms
+      .map((x: any) => ({
+        swarmId: x.id,
+        name: x.name,
+        balance: x.balance,
+        wins: x.wins,
+        attempts: x.attempts,
+        reputation: x.reputation,
+        meanTtcSec: x.meanTtcSec,
+      }))
+      .sort((a: any, b: any) => b.balance - a.balance)
+      .slice(0, 20);
+    return { rows, mode: 'swarms' };
+  } else {
+    // Show individual agent leaderboard
+    const s = await prisma.agentState.findMany();
+    const rows = s
+      .map((x: any) => ({
+        agentId: x.id,
+        balance: x.balance,
+        wins: x.wins,
+        attempts: x.attempts,
+      }))
+      .sort((a: any, b: any) => b.balance - a.balance)
+      .slice(0, 20);
+    return { rows, mode: 'agents' };
+  }
 });
 
 // Dashboard routes
@@ -64,6 +268,7 @@ app.get('/dashboard', async (request, reply) => {
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
         .header { background: #2d3748; color: white; padding: 1rem 2rem; }
         .container { padding: 2rem; max-width: 1400px; margin: 0 auto; }
+        .responses-container { padding: 1rem; margin: 0 auto; width: 98%; max-width: none; }
         .grid { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
         .jobs-grid { display: grid; gap: 1.5rem; grid-template-columns: 1fr; margin-top: 1.5rem; }
         .card { background: white; border-radius: 8px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -202,12 +407,37 @@ app.get('/dashboard', async (request, reply) => {
         }
         .refresh-btn { background: #4299e1; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; }
         .refresh-btn:hover { background: #3182ce; }
+
+        .header-controls { display: flex; align-items: center; gap: 1rem; }
+        .header-title { flex: 1; }
+        .control-btn { border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
+        .control-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-start { background: #48bb78; color: white; }
+        .btn-start:hover:not(:disabled) { background: #38a169; }
+        .btn-pause { background: #ed8936; color: white; }
+        .btn-pause:hover:not(:disabled) { background: #dd6b20; }
+        .btn-reset { background: #9f7aea; color: white; }
+        .btn-reset:hover:not(:disabled) { background: #805ad5; }
+        .system-status { display: inline-block; margin-left: 1rem; padding: 0.25rem 0.75rem; border-radius: 12px; font-size: 0.875rem; font-weight: bold; }
+        .status-running { background: #c6f6d5; color: #22543d; }
+        .status-paused { background: #fed7cc; color: #9c4221; }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>🍲 Agentic Soup Dashboard</h1>
-        <button class="refresh-btn" onclick="refreshAll()">Refresh All</button>
+        <div class="header-controls">
+            <div class="header-title">
+                <h1>🍲 Agentic Soup Dashboard</h1>
+                <span id="system-status" class="system-status status-paused">Paused</span>
+            </div>
+            <div>
+                <button id="btn-start" class="control-btn btn-start" onclick="controlSystem('start')">▶ Start</button>
+                <button id="btn-pause" class="control-btn btn-pause" onclick="controlSystem('pause')" disabled>⏸ Pause</button>
+                <button id="btn-reset" class="control-btn btn-reset" onclick="controlSystem('reset')">🔄 Reset</button>
+                <button class="refresh-btn" onclick="refreshAll()">Refresh All</button>
+                <a href="/responses" class="refresh-btn" style="text-decoration: none; display: inline-block; margin-left: 0.5rem;">📊 Job Responses</a>
+            </div>
+        </div>
     </div>
     
     <div class="container">
@@ -239,7 +469,7 @@ app.get('/dashboard', async (request, reply) => {
             </div>
             
             <div class="card">
-                <h3>Active Agents</h3>
+                <h3 id="agents-title">Active Agents</h3>
                 <div id="agents-list" class="agent-list"></div>
             </div>
             
@@ -261,9 +491,28 @@ app.get('/dashboard', async (request, reply) => {
     <script>
         let charts = {};
         
-        async function fetchData(endpoint) {
-            const response = await fetch(endpoint);
-            return response.json();
+        async function fetchData(endpoint, retries = 3, delay = 500) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(endpoint);
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+                    }
+                    return await response.json();
+                } catch (error) {
+                    console.warn('Fetch attempt ' + (i + 1) + ' failed for ' + endpoint + ':', error.message);
+
+                    // If this is the last retry, throw the error
+                    if (i === retries - 1) {
+                        throw error;
+                    }
+
+                    // Wait before retrying with exponential backoff
+                    const waitTime = delay * Math.pow(2, i);
+                    console.log('Retrying in ' + waitTime + 'ms...');
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                }
+            }
         }
         
         async function refreshSystemHealth() {
@@ -349,16 +598,37 @@ app.get('/dashboard', async (request, reply) => {
         }
         
         async function refreshAgentsList() {
-            const data = await fetchData('/api/agents');
+            // Check if we're in swarm mode by checking the leaderboard
+            const leaderboardData = await fetchData('/leaderboard');
+            const isSwarmMode = leaderboardData.mode === 'swarms';
+
+            // Update title based on mode
+            const titleElement = document.getElementById('agents-title');
+            titleElement.textContent = isSwarmMode ? 'Active Swarms' : 'Active Agents';
+
+            const endpoint = isSwarmMode ? '/api/swarms' : '/api/agents';
+            const data = await fetchData(endpoint);
             const container = document.getElementById('agents-list');
-            container.innerHTML = data.map(agent => 
-                '<div class="agent-item">' +
-                    '<span class="agent-status ' + (agent.alive ? 'alive' : 'dead') + '"></span>' +
-                    '<strong>' + (agent.name || agent.id.substring(0, 8) + '...') + '</strong><br>' +
-                    'Balance: ' + agent.balance + ' | Wins: ' + agent.wins + '/' + agent.attempts + ' | Temp: ' + agent.temperature + '<br>' +
-                    'Tools: ' + agent.tools + ' | Model: ' + agent.llmModel +
-                '</div>'
-            ).join('');
+
+            if (isSwarmMode) {
+                container.innerHTML = data.map(swarm =>
+                    '<div class="agent-item">' +
+                        '<span class="agent-status ' + (swarm.alive ? 'alive' : 'dead') + '"></span>' +
+                        '<strong>' + (swarm.name || swarm.id.substring(0, 8) + '...') + '</strong><br>' +
+                        'Balance: ' + swarm.balance + ' | Wins: ' + swarm.wins + '/' + swarm.attempts + ' | Rep: ' + swarm.reputation.toFixed(2) + '<br>' +
+                        'Agents: ' + swarm.agentCount + ' | Types: ' + swarm.archetypes +
+                    '</div>'
+                ).join('');
+            } else {
+                container.innerHTML = data.map(agent =>
+                    '<div class="agent-item">' +
+                        '<span class="agent-status ' + (agent.alive ? 'alive' : 'dead') + '"></span>' +
+                        '<strong>' + (agent.name || agent.id.substring(0, 8) + '...') + '</strong><br>' +
+                        'Balance: ' + agent.balance + ' | Wins: ' + agent.wins + '/' + agent.attempts + ' | Temp: ' + agent.temperature + '<br>' +
+                        'Tools: ' + agent.tools + ' | Model: ' + agent.llmModel +
+                    '</div>'
+                ).join('');
+            }
         }
         
         async function refreshActivityLog() {
@@ -396,7 +666,10 @@ app.get('/dashboard', async (request, reply) => {
                 let resultHtml = '';
                 if (job.result) {
                     const success = job.result.ok ? '✅' : '❌';
-                    const artifact = job.result.artifact || 'No output';
+                    const rawArtifact = job.result.artifact || 'No output';
+                    // Handle case where artifact might be an object
+                    const artifact = typeof rawArtifact === 'string' ? rawArtifact :
+                                   (typeof rawArtifact === 'object' ? JSON.stringify(rawArtifact, null, 2) : String(rawArtifact));
                     const truncatedArtifact = artifact.length > 100 ? artifact.substring(0, 100) + '...' : artifact;
                     
                     resultHtml = '<div class="job-result">' +
@@ -455,22 +728,416 @@ app.get('/dashboard', async (request, reply) => {
         }
         
         async function refreshAll() {
-            await Promise.all([
-                refreshSystemHealth(),
-                refreshInequalityChart(),
-                refreshThroughputChart(), 
-                refreshCentralityChart(),
-                refreshAgentsList(),
-                refreshActivityLog(),
-                refreshJobsList()
-            ]);
+            const refreshFunctions = [
+                { name: 'System Health', fn: refreshSystemHealth },
+                { name: 'Inequality Chart', fn: refreshInequalityChart },
+                { name: 'Throughput Chart', fn: refreshThroughputChart },
+                { name: 'Centrality Chart', fn: refreshCentralityChart },
+                { name: 'Agents List', fn: refreshAgentsList },
+                { name: 'Activity Log', fn: refreshActivityLog },
+                { name: 'Jobs List', fn: refreshJobsList }
+            ];
+
+            const results = await Promise.allSettled(
+                refreshFunctions.map(({ name, fn }) =>
+                    fn().catch(error => {
+                        console.warn('Failed to refresh ' + name + ':', error.message);
+                        throw error;
+                    })
+                )
+            );
+
+            const failures = results.filter(result => result.status === 'rejected');
+            if (failures.length > 0) {
+                console.warn(failures.length + ' dashboard sections failed to refresh');
+            }
         }
-        
+
+        // System control functions
+        async function controlSystem(action) {
+            const btn = event.target;
+            const originalText = btn.textContent;
+
+            try {
+                btn.disabled = true;
+                btn.textContent = '⏳ ' + originalText.substring(2);
+
+                const response = await fetch('/api/system/' + action, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    updateSystemStatus();
+                    await refreshAll();
+                    alert(result.message);
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
+        async function updateSystemStatus() {
+            try {
+                const response = await fetch('/api/system/status');
+                const data = await response.json();
+
+                if (data.success) {
+                    const status = data.status.status;
+                    const statusElement = document.getElementById('system-status');
+                    const btnStart = document.getElementById('btn-start');
+                    const btnPause = document.getElementById('btn-pause');
+
+                    // Update status display
+                    statusElement.className = 'system-status status-' + status;
+                    statusElement.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+
+                    // Update button states
+                    switch (status) {
+                        case 'running':
+                            btnStart.disabled = true;
+                            btnPause.disabled = false;
+                            break;
+                        case 'paused':
+                            btnStart.disabled = false;
+                            btnPause.disabled = true;
+                            break;
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to update system status:', error);
+            }
+        }
+
         // Initial load
         refreshAll();
-        
+        updateSystemStatus();
+
         // Auto-refresh every 30 seconds
-        setInterval(refreshAll, 30000);
+        setInterval(() => {
+            refreshAll();
+            updateSystemStatus();
+        }, 30000);
+    </script>
+</body>
+</html>
+`;
+});
+
+// Responses table page
+app.get('/responses', async (request, reply) => {
+  reply.type('text/html');
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Responses - Agentic Soup</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        .nav-links {
+            background: #fff;
+            padding: 1rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .nav-links a {
+            color: #4299e1;
+            text-decoration: none;
+            margin: 0 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .nav-links a:hover {
+            background-color: #e6f3ff;
+        }
+
+        .container {
+            max-width: 95%;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .controls {
+            background: white;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .refresh-btn {
+            background: #4299e1;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .refresh-btn:hover {
+            background: #3182ce;
+        }
+
+        .table-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th {
+            background: #667eea;
+            color: white;
+            padding: 0.75rem 0.5rem;
+            text-align: left;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 0.75rem 0.5rem;
+            border-bottom: 1px solid #e2e8f0;
+            vertical-align: top;
+        }
+
+        tr:hover {
+            background-color: #f7fafc;
+        }
+
+        .status-success {
+            color: #22543d;
+            font-weight: bold;
+        }
+
+        .status-failed {
+            color: #742a2a;
+            font-weight: bold;
+        }
+
+        .status-pending {
+            color: #744210;
+            font-weight: bold;
+        }
+
+        .error-yes {
+            color: #742a2a;
+            font-weight: bold;
+        }
+
+        .cell-prompt, .cell-answer {
+            word-wrap: break-word;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            width: auto;
+        }
+
+        .cell-error-desc {
+            word-wrap: break-word;
+            font-size: 0.8rem;
+            color: #742a2a;
+            width: auto;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        .error-message {
+            background: #fed7d7;
+            color: #742a2a;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 1rem 0;
+        }
+
+        .info-text {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Job Responses Table</h1>
+        <p>Last 50 Job Executions (matching run-swarms-10m.sh format)</p>
+    </div>
+
+    <div class="nav-links">
+        <a href="/dashboard">← Back to Dashboard</a>
+        <a href="/leaderboard">View Leaderboard</a>
+    </div>
+
+    <div class="responses-container">
+        <div class="controls">
+            <button class="refresh-btn" onclick="loadResponsesData()">🔄 Refresh Data</button>
+            <div class="info-text">
+                Showing the most recent job executions with their responses, matching the format from run-swarms-10m.sh
+            </div>
+        </div>
+
+        <div class="table-container">
+            <div id="loading" class="loading">Loading job responses...</div>
+            <div id="error-message" class="error-message" style="display: none;"></div>
+
+            <div class="table-wrapper">
+                <table id="responses-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>Job ID</th>
+                            <th>Status</th>
+                            <th>Prompt</th>
+                            <th>Answer</th>
+                            <th>Tools Used</th>
+                            <th>Swarm Name</th>
+                            <th>Swarm Composition</th>
+                            <th>Agent Count</th>
+                            <th>Error</th>
+                            <th>Error Description</th>
+                        </tr>
+                    </thead>
+                    <tbody id="responses-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let responsesData = [];
+
+        async function loadResponsesData() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('responses-table').style.display = 'none';
+            document.getElementById('error-message').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/responses-table');
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                responsesData = data.rows || [];
+                renderResponsesTable();
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('responses-table').style.display = 'block';
+            } catch (error) {
+                console.error('Failed to load responses data:', error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error-message').textContent = 'Failed to load data: ' + error.message;
+                document.getElementById('error-message').style.display = 'block';
+            }
+        }
+
+        function renderResponsesTable() {
+            const tbody = document.getElementById('responses-tbody');
+            tbody.innerHTML = '';
+
+            if (responsesData.length === 0) {
+                const row = tbody.insertRow();
+                const cell = row.insertCell(0);
+                cell.colSpan = 10;
+                cell.textContent = 'No job responses found';
+                cell.style.textAlign = 'center';
+                cell.style.padding = '2rem';
+                cell.style.color = '#666';
+                return;
+            }
+
+            responsesData.forEach(job => {
+                const row = tbody.insertRow();
+
+                // Job ID
+                const jobIdCell = row.insertCell();
+                jobIdCell.textContent = job.jobId;
+
+                // Status
+                const statusCell = row.insertCell();
+                statusCell.textContent = job.status;
+                statusCell.className = \`status-\${job.status.toLowerCase()}\`;
+
+                // Prompt
+                const promptCell = row.insertCell();
+                promptCell.textContent = job.prompt;
+                promptCell.className = 'cell-prompt';
+
+                // Answer
+                const answerCell = row.insertCell();
+                answerCell.textContent = job.answer;
+                answerCell.className = 'cell-answer';
+
+                // Tools Used
+                const toolsCell = row.insertCell();
+                toolsCell.textContent = job.toolsUsed || '-';
+
+                // Swarm Name
+                const swarmNameCell = row.insertCell();
+                swarmNameCell.textContent = job.swarmName || 'Unknown Swarm';
+                // Swarm Composition
+                const swarmCompositionCell = row.insertCell();
+                swarmCompositionCell.textContent = job.swarmComposition || 'Unknown';
+                // Agent Count
+                const agentCountCell = row.insertCell();
+                agentCountCell.textContent = job.agentCount || '0';
+
+                // Error
+                const errorCell = row.insertCell();
+                errorCell.textContent = job.error || '-';
+                if (job.error === 'Yes') {
+                    errorCell.className = 'error-yes';
+                }
+
+                // Error Description
+                const errorDescCell = row.insertCell();
+                errorDescCell.textContent = job.errorDescription || '-';
+                errorDescCell.className = 'cell-error-desc';
+            });
+        }
+
+        // Load data on page load
+        loadResponsesData();
+
+        // Auto-refresh every 60 seconds
+        setInterval(loadResponsesData, 60000);
     </script>
 </body>
 </html>
@@ -615,6 +1282,33 @@ app.get('/api/agents', async () => {
       temperature: blueprint?.temperature || 0,
       tools: getToolsForArchetype(blueprint?.archetype || 'llm-only'),
       llmModel: blueprint?.llmModel || 'unknown',
+    };
+  });
+});
+
+app.get('/api/swarms', async () => {
+  if (BOOTSTRAP) return [];
+  const swarms = await prisma.swarm.findMany({
+    orderBy: { balance: 'desc' },
+    include: {
+      agents: true,
+    },
+  });
+
+  return swarms.map((swarm: any) => {
+    const agentArchetypes = swarm.agents.map((agent: any) => agent.archetype).filter(Boolean);
+    return {
+      id: swarm.id,
+      name: swarm.name,
+      alive: swarm.alive,
+      balance: swarm.balance,
+      wins: swarm.wins,
+      attempts: swarm.attempts,
+      reputation: swarm.reputation,
+      meanTtcSec: swarm.meanTtcSec,
+      agentCount: swarm.agents.length,
+      archetypes: agentArchetypes.join(', '),
+      description: swarm.description,
     };
   });
 });
@@ -813,18 +1507,26 @@ app.get('/api/activity', async () => {
   });
 
   // Get agent names for the activity log
-  const agentIds = [...new Set(recentLedger.map((l: any) => l.agentId))];
-  const agents = await prisma.agentState.findMany({
-    where: { id: { in: agentIds } },
-    select: { id: true, name: true },
-  });
+  const agentIds = [...new Set(recentLedger.map((l: any) => l.agentId).filter(Boolean))];
+  const agents =
+    agentIds.length > 0
+      ? await prisma.agentState.findMany({
+          where: { id: { in: agentIds } },
+          select: { id: true, name: true },
+        })
+      : [];
   const agentNameMap = new Map(agents.map((a: any) => [a.id, a.name]));
 
   const activities = [
     ...recentLedger.map((l: any) => ({
       timestamp: l.ts,
       action:
-        (agentNameMap.get(l.agentId) || `Agent ${l.agentId.substring(0, 8)}...`) +
+        (agentNameMap.get(l.agentId) ||
+          (l.agentId
+            ? `Agent ${l.agentId.substring(0, 8)}...`
+            : l.swarmId
+              ? `Swarm ${l.swarmId.substring(0, 8)}...`
+              : 'System')) +
         ' ' +
         (l.delta > 0 ? 'earned' : 'spent') +
         ' ' +
@@ -855,6 +1557,254 @@ app.get('/api/activity', async () => {
     .slice(0, 100);
 });
 
+// API endpoint for responses table (matching run-swarms-10m.sh format)
+app.get('/api/responses-table', async () => {
+  // Skip BOOTSTRAP check to show real data even in bootstrap mode
+
+  try {
+    // Fetch completed jobs directly from ledger (since Job records are deleted after completion)
+    // Include swarm information to get agent details
+    const completedJobEntries = await prisma.ledger.findMany({
+      where: {
+        reason: { in: ['payout', 'fail'] },
+      },
+      take: 50,
+      orderBy: { ts: 'desc' },
+      include: {
+        swarm: {
+          select: {
+            name: true,
+            agents: {
+              select: {
+                name: true,
+                archetype: true, // For swarm agents, archetype is stored directly
+                blueprintId: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Get job IDs for Redis lookup
+    const jobIds = completedJobEntries.map((entry: any) => entry.jobId);
+    const jobDataMap = new Map();
+
+    // Fetch job data from Redis (similar to summarize-run.js logic)
+    if (redis && jobIds.length > 0) {
+      try {
+        const jobIdSet = new Set(jobIds);
+        const completed = await redis.zrange('bull:jobs:completed', 0, -1);
+        const failed = await redis.zrange('bull:jobs:failed', 0, -1);
+        const allProcessed = [...completed, ...failed];
+
+        // Batch fetch job data
+        const batchSize = 100;
+        for (let i = 0; i < allProcessed.length; i += batchSize) {
+          const batch = allProcessed.slice(i, i + batchSize);
+          const batchPromises = batch.map(async (bullJobId) => {
+            try {
+              const [dataRaw, returnRaw] = await redis.hmget(
+                `bull:jobs:${bullJobId}`,
+                'data',
+                'returnvalue'
+              );
+              if (!dataRaw) return null;
+
+              const parsedData = JSON.parse(dataRaw);
+              const dbJobId = parsedData?.dbJobId;
+              if (!dbJobId || !jobIdSet.has(dbJobId)) return null;
+
+              const parsedReturn = returnRaw ? JSON.parse(returnRaw) : null;
+
+              // Extract the actual answer content from the return value
+              let extractedAnswer = 'No response data';
+              let toolsUsedDetails = 'N/A';
+              let agentType = 'Unknown';
+              let selectedTool = null;
+
+              if (parsedReturn) {
+                // Extract the artifact (main response content)
+                if (parsedReturn.artifact) {
+                  extractedAnswer = parsedReturn.artifact;
+                } else if (typeof parsedReturn === 'string') {
+                  extractedAnswer = parsedReturn;
+                } else if (parsedReturn.result) {
+                  extractedAnswer = parsedReturn.result;
+                } else if (parsedReturn.response) {
+                  extractedAnswer = parsedReturn.response;
+                } else if (parsedReturn.answer) {
+                  extractedAnswer = parsedReturn.answer;
+                } else {
+                  // Try to get a meaningful string representation
+                  extractedAnswer = JSON.stringify(parsedReturn);
+                }
+
+                // Extract tools information - show specific tool names
+                if (parsedReturn.selectedTool) {
+                  toolsUsedDetails = parsedReturn.selectedTool;
+                } else if (parsedReturn.toolsUsed === true || parsedReturn.toolsUsed === 'true') {
+                  toolsUsedDetails = 'Tools used (name unknown)';
+                } else if (
+                  parsedReturn.toolsUsed === false ||
+                  parsedReturn.toolsUsed === 'false' ||
+                  !parsedReturn.toolsUsed
+                ) {
+                  toolsUsedDetails = 'No tools used';
+                } else if (typeof parsedReturn.toolsUsed === 'string') {
+                  toolsUsedDetails = parsedReturn.toolsUsed;
+                } else {
+                  toolsUsedDetails = 'Unknown';
+                }
+
+                // Agent type will be determined from database archetype (see below)
+
+                selectedTool = parsedReturn.selectedTool;
+              }
+
+              return {
+                dbJobId,
+                prompt:
+                  typeof parsedData?.payload === 'string'
+                    ? parsedData.payload
+                    : parsedData?.payload?.prompt || JSON.stringify(parsedData?.payload || {}),
+                answer: extractedAnswer,
+                toolsUsed: toolsUsedDetails,
+                agentType: agentType,
+                selectedTool: selectedTool,
+                newToolsCreated: parsedReturn?.newToolsCreated || false,
+                category: parsedData?.category || 'general',
+              };
+            } catch (err) {
+              return null;
+            }
+          });
+
+          const batchResults = await Promise.all(batchPromises);
+          for (const result of batchResults) {
+            if (result) {
+              jobDataMap.set(result.dbJobId, result);
+            }
+          }
+
+          // Early exit if we found all jobs we need
+          if (jobDataMap.size === jobIdSet.size) {
+            break;
+          }
+        }
+      } catch (redisError) {
+        console.error('[API] Redis lookup failed:', redisError);
+      }
+    }
+
+    // Process each ledger entry into table format
+    const rows = completedJobEntries.map((entry: any) => {
+      const status = entry.reason === 'payout' ? 'Success' : 'Failed';
+      const jobIdTruncated = entry.jobId.substring(0, 8) + '...';
+
+      // Get job data from Redis
+      const jobData = jobDataMap.get(entry.jobId);
+
+      let answerTruncated = '';
+      let error = '-';
+      let errorDescription = '';
+      let prompt = 'Job prompt not available';
+      let toolsUsed = 'N/A';
+
+      if (jobData) {
+        prompt = jobData.prompt;
+        toolsUsed = jobData.toolsUsed;
+
+        if (entry.reason === 'payout') {
+          // Extract the artifact field when the answer is a JSON object, otherwise show the full answer
+          if (typeof jobData.answer === 'string') {
+            answerTruncated = jobData.answer;
+          } else if (typeof jobData.answer === 'object' && jobData.answer !== null) {
+            // If it's an object, try to extract the artifact field first
+            if (jobData.answer.artifact) {
+              answerTruncated = jobData.answer.artifact;
+            } else {
+              // Fallback to JSON string if no artifact field
+              answerTruncated = JSON.stringify(jobData.answer);
+            }
+          } else {
+            answerTruncated = String(jobData.answer || '');
+          }
+          error = '-';
+        } else if (entry.reason === 'fail') {
+          answerTruncated = 'Job failed to complete';
+          error = 'Yes';
+          errorDescription = 'Job execution failed';
+        }
+      } else {
+        // Fallback when Redis data not available
+        if (entry.reason === 'payout') {
+          answerTruncated = `Job completed successfully (Quality: ${entry.qualityGrade || 'N/A'})`;
+          error = '-';
+        } else if (entry.reason === 'fail') {
+          answerTruncated = 'Job failed to complete';
+          error = 'Yes';
+          errorDescription = 'Job execution failed';
+        }
+      }
+
+      // Extract swarm information for display (like Active Swarms section)
+      let swarmName = 'Unknown Swarm';
+      let swarmComposition = 'Unknown';
+      let agentCount = 0;
+
+      // For swarm-based jobs, show swarm details like in Active Swarms
+      if (entry.swarm?.agents && entry.swarm.agents.length > 0) {
+        swarmName = entry.swarm.name || entry.swarm.id.substring(0, 8) + '...';
+        agentCount = entry.swarm.agents.length;
+
+        // Get all agent archetypes like in Active Swarms display
+        const agentArchetypes = entry.swarm.agents
+          .map((agent: any) => agent.archetype)
+          .filter(Boolean);
+
+        // Remove duplicates and format like "tool-builder, research-specialist"
+        const uniqueArchetypes = [...new Set(agentArchetypes)];
+        swarmComposition =
+          uniqueArchetypes.length > 0 ? uniqueArchetypes.join(', ') : 'mixed agents';
+      } else if (entry.swarm) {
+        swarmName = entry.swarm.name || 'Unnamed Swarm';
+        swarmComposition = 'Swarm details unavailable';
+      }
+
+      return {
+        jobId: jobIdTruncated,
+        status: status,
+        prompt: prompt,
+        answer: answerTruncated,
+        toolsUsed: toolsUsed,
+        swarmName: swarmName,
+        swarmComposition: swarmComposition,
+        agentCount: agentCount,
+        selectedTool: jobData?.selectedTool || null,
+        newToolsCreated: jobData?.newToolsCreated || false,
+        error: error,
+        errorDescription: errorDescription,
+        timestamp: entry.ts,
+        qualityGrade: entry.qualityGrade,
+      };
+    });
+
+    return {
+      rows,
+      totalRows: rows.length,
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('[API] Failed to fetch responses table data:', error);
+    return {
+      rows: [],
+      totalRows: 0,
+      error: 'Failed to fetch data: ' + (error as Error).message,
+    };
+  }
+});
+
 let jobQueue: any;
 
 async function seedIfEmpty() {
@@ -868,8 +1818,16 @@ async function seedIfEmpty() {
     return;
   }
 
-  // Create agents with tool-based archetypes (matching SimpleReactAgent types)
+  // Check if we should use swarms or individual agents
+  const USE_SWARMS = cfg.USE_SWARMS;
   const TEST_TOOL_BUILDER_ONLY = process.env.TEST_TOOL_BUILDER_ONLY === '1';
+
+  if (USE_SWARMS) {
+    await seedSwarms();
+    return;
+  }
+
+  // Create agents with tool-based archetypes (matching SimpleReactAgent types)
   const agentArchetypes = TEST_TOOL_BUILDER_ONLY
     ? ['tool-builder']
     : ['wikipedia', 'llm-only', 'web-browser', 'google-trends', 'tool-builder'];
@@ -944,6 +1902,78 @@ async function seedIfEmpty() {
   log(`[seed] Seeding complete: ${totalAgents} agents created`);
 }
 
+async function seedSwarms() {
+  log('[seedSwarms] Creating swarms...');
+
+  const SWARM_COUNT = cfg.SWARM_COUNT;
+  const AGENTS_PER_SWARM = cfg.AGENTS_PER_SWARM;
+
+  // Available agent archetypes for swarms
+  const agentArchetypes = ['llm-only', 'web-browser', 'wikipedia', 'google-trends', 'tool-builder'];
+
+  for (let i = 0; i < SWARM_COUNT; i++) {
+    // Generate fantasy swarm name
+    const swarmNames = await nameGenerator.generateNames([
+      { archetype: 'swarm', temperature: 0.7, tools: [] },
+    ]);
+    const swarmName = swarmNames[0];
+    const swarmId = `swarm_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+    // Create random selection of agent types for this swarm
+    const swarmArchetypes = [];
+    for (let j = 0; j < AGENTS_PER_SWARM; j++) {
+      const randomArchetype = agentArchetypes[Math.floor(Math.random() * agentArchetypes.length)];
+      swarmArchetypes.push(randomArchetype);
+    }
+
+    log(
+      `[seedSwarms] Creating swarm "${swarmName.fullName}" with archetypes: ${swarmArchetypes.join(', ')}`
+    );
+
+    // Create swarm in database
+    await prisma.swarm.create({
+      data: {
+        id: swarmId,
+        name: swarmName.fullName,
+        description: `A collaborative swarm of ${AGENTS_PER_SWARM} agents`,
+        balance: 1000, // Starting balance
+        reputation: 0.5, // Starting reputation
+      },
+    });
+
+    // Note: SwarmConfig would be created here if needed for SwarmAgent
+
+    // Create individual agent records in database for tracking
+    for (let j = 0; j < AGENTS_PER_SWARM; j++) {
+      const agentId = `${swarmId}_agent_${j}`;
+      const agentNames = await nameGenerator.generateNames([
+        { archetype: swarmArchetypes[j], temperature: 0.7, tools: [] },
+      ]);
+      const agentName = agentNames[0];
+
+      await prisma.agentState.create({
+        data: {
+          id: agentId,
+          name: agentName.fullName,
+          archetype: swarmArchetypes[j],
+          balance: 0, // Swarm manages balance
+          reputation: 0.5,
+          attempts: 0,
+          wins: 0,
+          meanTtcSec: 0,
+          swarmId: swarmId, // Link to swarm
+        },
+      });
+    }
+
+    log(`[seedSwarms] Created swarm "${swarmName.fullName}" with ${AGENTS_PER_SWARM} agents`);
+  }
+
+  log(
+    `[seedSwarms] Seeding complete: ${SWARM_COUNT} swarms created with ${SWARM_COUNT * AGENTS_PER_SWARM} total agents`
+  );
+}
+
 async function generateJobs() {
   let successCount = 0;
   let failureCount = 0;
@@ -1002,124 +2032,349 @@ async function gradeWithLLM(jobPrompt: string, artifact: string) {
 const agentWorkers: any[] = [];
 async function startAgentWorkers() {
   log('[workers] Starting agent workers...');
-  const agents = await prisma.agentState.findMany({ where: { alive: true } });
-  const bps = await prisma.blueprint.findMany();
-  log(`[workers] Found ${agents.length} alive agents and ${bps.length} blueprints`);
 
-  const TEST_TOOL_BUILDER_ONLY = process.env.TEST_TOOL_BUILDER_ONLY === '1';
-  const filtered = TEST_TOOL_BUILDER_ONLY
-    ? agents.filter((s: any) => {
-        const bp = bps.find((b: any) => b.id === s.blueprintId);
-        return bp?.archetype === 'tool-builder';
-      })
-    : agents;
-  if (TEST_TOOL_BUILDER_ONLY) {
-    log(`[workers] TEST_TOOL_BUILDER_ONLY=1 → filtering to ${filtered.length} tool-builder agents`);
-  }
+  try {
+    const USE_SWARMS = cfg.USE_SWARMS;
 
-  for (const s of filtered) {
-    const bp = bps.find((b: any) => b.id === s.blueprintId)!;
+    if (USE_SWARMS) {
+      // Use swarm-based workers
+      const swarms = await prisma.swarm.findMany({ where: { alive: true } });
+      log(`[workers] Found ${swarms.length} alive swarms`);
 
-    const worker = new Worker(
-      'jobs',
-      async (job: any) => {
-        const started = Date.now();
+      for (let i = 0; i < swarms.length; i++) {
+        const swarm = swarms[i];
 
-        // Create simple React agent with archetype-based tools
-        const agent = createAgentForBlueprint(s.id, bp.archetype || 'llm-only');
-        log(
-          `[Worker] Using SimpleReactAgent with archetype ${bp.archetype || 'llm-only'} for agent ${s.id}`
+        // Add delay between worker creation to prevent server overload
+        if (i > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 100)); // 100ms delay
+        }
+
+        // Get agents for this swarm to determine archetypes
+        const swarmAgents = await prisma.agentState.findMany({
+          where: { swarmId: swarm.id, alive: true },
+        });
+
+        const swarmArchetypes = swarmAgents.map((a: any) => a.archetype);
+
+        // Create swarm config
+        const swarmConfig: SwarmConfig = {
+          id: swarm.id,
+          name: swarm.name,
+          description: swarm.description || undefined,
+          agentTypes: swarmArchetypes as any[],
+          agentCount: swarmAgents.length,
+        };
+
+        const worker = new Worker(
+          'jobs',
+          async (job: any) => {
+            const started = Date.now();
+
+            // Check if system is paused
+            if (systemState.status !== 'running') {
+              log(`[Worker] Skipping job ${job.data.dbJobId} - system is paused`);
+              throw new Error('System is paused');
+            }
+
+            // Create SwarmAgent to handle the job
+            const swarmAgent = createSwarmAgent(swarmConfig);
+            log(`[Worker] Swarm ${swarm.id} processing job ${job.data.dbJobId}`);
+
+            try {
+              const result = await swarmAgent.invoke({
+                category: job.data.category || 'general',
+                payload: job.data.payload,
+                payout: job.data.payout,
+                deadlineS: job.data.deadlineS,
+              });
+
+              // First check if the swarm execution succeeded
+              const agentSucceeded = true; // SwarmAgent throws on failure
+
+              // Only grade the artifact if the swarm actually succeeded
+              let gradeResult: { passed: boolean; qualityScore?: number } = { passed: false };
+              let gradingFailed = false;
+
+              if (agentSucceeded) {
+                try {
+                  // Extract job prompt for grading context
+                  const jobPrompt =
+                    typeof job.data.payload === 'string'
+                      ? job.data.payload
+                      : job.data.payload.prompt || JSON.stringify(job.data.payload);
+
+                  gradeResult = await gradeWithLLM(jobPrompt, result);
+                } catch (error) {
+                  logError(`[workers] Grading failed for job ${job.data.dbJobId}:`, error);
+                  gradingFailed = true;
+                }
+              }
+
+              // The job is successful only if swarm execution succeeded, grading succeeded, and grade passed
+              const jobSucceeded = agentSucceeded && !gradingFailed && gradeResult.passed;
+
+              const delta = jobSucceeded ? job.data.payout : -FAIL_PENALTY;
+              await prisma.ledger.create({
+                data: {
+                  swarmId: swarm.id, // Use swarmId instead of agentId
+                  jobId: job.data.dbJobId,
+                  delta,
+                  reason: jobSucceeded ? 'payout' : 'fail',
+                  qualityGrade: gradeResult.qualityScore || null,
+                },
+              });
+
+              const ttc = Math.floor((Date.now() - started) / 1000);
+              await prisma.swarm.update({
+                where: { id: swarm.id },
+                data: {
+                  balance: { increment: delta },
+                  attempts: { increment: 1 },
+                  wins: { increment: jobSucceeded ? 1 : 0 },
+                  meanTtcSec: Math.floor(
+                    (swarm.meanTtcSec * swarm.attempts + ttc) / (swarm.attempts + 1)
+                  ),
+                },
+              });
+
+              // Clean up excessive whitespace to prevent storage issues
+              let artifact = result;
+              if (typeof result === 'string') {
+                const originalLength = result.length;
+
+                // First handle excessive spaces within lines
+                artifact = result.replace(/ {100,}/g, ' '); // Replace 100+ spaces with single space
+
+                // Then handle line-level whitespace
+                artifact = artifact
+                  .split('\n')
+                  .map((line) => line.trim()) // Trim whitespace from each line
+                  .filter((line) => line.length > 0 || artifact.includes('\n\n')) // Keep empty lines only if there are paragraph breaks
+                  .join('\n')
+                  .replace(/\n{3,}/g, '\n\n') // Replace 3+ newlines with just 2
+                  .trim(); // Remove leading/trailing whitespace
+
+                if (originalLength > 100000 && artifact.length < originalLength / 2) {
+                  log(
+                    `[Worker] Cleaned swarm result whitespace: ${originalLength} -> ${artifact.length} chars`
+                  );
+                }
+
+                // Only truncate if still too large after cleanup
+                if (artifact.length > 100000) {
+                  artifact = artifact.substring(0, 100000) + '\n... [truncated due to size]';
+                  log(
+                    `[Worker] Swarm result still too large after cleanup (${artifact.length} chars), truncating`
+                  );
+                }
+              }
+
+              return {
+                ok: jobSucceeded,
+                artifact,
+                toolsUsed: true, // Swarms use tools
+                newToolsCreated: false, // Track if needed
+                stepsUsed: 0, // Track if needed
+                selectedTool: null,
+                builderRationale: null,
+                executionArgs: null,
+                toolOutputSnippet: null,
+                summarySource: null,
+                totalToolsAvailable: null,
+              };
+            } catch (error) {
+              logError(`[Worker] Swarm ${swarm.id} failed on job ${job.data.dbJobId}:`, error);
+
+              // Record failure
+              const delta = -FAIL_PENALTY;
+              await prisma.ledger.create({
+                data: {
+                  swarmId: swarm.id,
+                  jobId: job.data.dbJobId,
+                  delta,
+                  reason: 'fail',
+                  qualityGrade: null,
+                },
+              });
+
+              const ttc = Math.floor((Date.now() - started) / 1000);
+              await prisma.swarm.update({
+                where: { id: swarm.id },
+                data: {
+                  balance: { increment: delta },
+                  attempts: { increment: 1 },
+                  meanTtcSec: Math.floor(
+                    (swarm.meanTtcSec * swarm.attempts + ttc) / (swarm.attempts + 1)
+                  ),
+                },
+              });
+
+              return {
+                ok: false,
+                artifact: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                toolsUsed: false,
+                newToolsCreated: false,
+                stepsUsed: 0,
+                selectedTool: null,
+                builderRationale: null,
+                executionArgs: null,
+                toolOutputSnippet: null,
+                summarySource: null,
+                totalToolsAvailable: null,
+              };
+            }
+          },
+          {
+            connection: redis,
+            concurrency: 1, // One job per swarm at a time for now
+          }
         );
 
-        log(
-          `[Worker] Agent ${s.id} (archetype: ${bp.archetype || 'llm-only'}) processing general job ${job.data.dbJobId}`
-        );
-        const res: any = await agent.handle(job.data);
+        agentWorkers.push(worker);
+      }
 
-        const steps = res.stepsUsed || 0;
-        if (steps > 0) {
+      log(`[workers] Started ${swarms.length} swarm workers`);
+      return;
+    }
+
+    // Original individual agent logic
+    const agents = await prisma.agentState.findMany({ where: { alive: true } });
+    const bps = await prisma.blueprint.findMany();
+    log(`[workers] Found ${agents.length} alive agents and ${bps.length} blueprints`);
+
+    const TEST_TOOL_BUILDER_ONLY = process.env.TEST_TOOL_BUILDER_ONLY === '1';
+    const filtered = TEST_TOOL_BUILDER_ONLY
+      ? agents.filter((s: any) => {
+          const bp = bps.find((b: any) => b.id === s.blueprintId);
+          return bp?.archetype === 'tool-builder';
+        })
+      : agents;
+    if (TEST_TOOL_BUILDER_ONLY) {
+      log(
+        `[workers] TEST_TOOL_BUILDER_ONLY=1 → filtering to ${filtered.length} tool-builder agents`
+      );
+    }
+
+    for (let i = 0; i < filtered.length; i++) {
+      const s = filtered[i];
+
+      // Add delay between worker creation to prevent server overload
+      if (i > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 100)); // 100ms delay
+      }
+
+      const bp = bps.find((b: any) => b.id === s.blueprintId)!;
+
+      const worker = new Worker(
+        'jobs',
+        async (job: any) => {
+          const started = Date.now();
+
+          // Check if system is paused
+          if (systemState.status !== 'running') {
+            log(`[Worker] Skipping job ${job.data.dbJobId} - system is paused`);
+            throw new Error('System is paused');
+          }
+
+          // Create simple React agent with archetype-based tools
+          const agent = createAgentForBlueprint(s.id, bp.archetype || 'llm-only');
+          log(
+            `[Worker] Using SimpleReactAgent with archetype ${bp.archetype || 'llm-only'} for agent ${s.id}`
+          );
+
+          log(
+            `[Worker] Agent ${s.id} (archetype: ${bp.archetype || 'llm-only'}) processing general job ${job.data.dbJobId}`
+          );
+          const res: any = await agent.handle(job.data);
+
+          const steps = res.stepsUsed || 0;
+          if (steps > 0) {
+            await prisma.ledger.create({
+              data: {
+                agentId: s.id,
+                jobId: job.data.dbJobId,
+                delta: -steps,
+                reason: 'browser_steps',
+              },
+            });
+            await prisma.agentState.update({
+              where: { id: s.id },
+              data: { balance: { decrement: steps } },
+            });
+          }
+
+          // First check if the agent execution succeeded
+          const agentSucceeded = res.ok;
+
+          // Only grade the artifact if the agent actually succeeded
+          let gradeResult: { passed: boolean; qualityScore?: number } = { passed: false };
+          let gradingFailed = false;
+
+          if (agentSucceeded) {
+            try {
+              // Extract job prompt for grading context
+              const jobPrompt =
+                typeof job.data.payload === 'string'
+                  ? job.data.payload
+                  : job.data.payload.prompt || JSON.stringify(job.data.payload);
+
+              gradeResult = await gradeWithLLM(jobPrompt, res.artifact);
+            } catch (error) {
+              logError(`[workers] Grading failed for job ${job.data.dbJobId}:`, error);
+              gradingFailed = true;
+            }
+          }
+
+          // The job is successful only if agent execution succeeded, grading succeeded, and grade passed
+          const jobSucceeded = agentSucceeded && !gradingFailed && gradeResult.passed;
+
+          const delta = jobSucceeded ? job.data.payout : -FAIL_PENALTY;
           await prisma.ledger.create({
             data: {
               agentId: s.id,
               jobId: job.data.dbJobId,
-              delta: -steps,
-              reason: 'browser_steps',
+              delta,
+              reason: jobSucceeded ? 'payout' : 'fail',
+              qualityGrade: gradeResult.qualityScore || null, // Store score even for failures
             },
           });
+
+          const ttc = Math.floor((Date.now() - started) / 1000);
           await prisma.agentState.update({
             where: { id: s.id },
-            data: { balance: { decrement: steps } },
+            data: {
+              balance: { increment: delta },
+              attempts: { increment: 1 },
+              wins: { increment: jobSucceeded ? 1 : 0 },
+              meanTtcSec: Math.floor((s.meanTtcSec * s.attempts + ttc) / (s.attempts + 1)),
+            },
           });
+
+          return {
+            ok: jobSucceeded,
+            artifact: res.artifact,
+            toolsUsed: res.toolsUsed ?? false,
+            newToolsCreated: res.newToolsCreated ?? false,
+            stepsUsed: res.stepsUsed ?? 0,
+            selectedTool: res.selectedTool ?? null,
+            builderRationale: res.builderRationale ?? null,
+            executionArgs: res.executionArgs ?? null,
+            toolOutputSnippet: res.toolOutputSnippet ?? null,
+            summarySource: res.summarySource ?? null,
+            totalToolsAvailable: res.totalToolsAvailable ?? null,
+          };
+        },
+        {
+          connection: redis,
+          concurrency: 3,
         }
+      );
 
-        // First check if the agent execution succeeded
-        const agentSucceeded = res.ok;
-
-        // Only grade the artifact if the agent actually succeeded
-        let gradeResult: { passed: boolean; qualityScore?: number } = { passed: false };
-        let gradingFailed = false;
-
-        if (agentSucceeded) {
-          try {
-            // Extract job prompt for grading context
-            const jobPrompt =
-              typeof job.data.payload === 'string'
-                ? job.data.payload
-                : job.data.payload.prompt || JSON.stringify(job.data.payload);
-
-            gradeResult = await gradeWithLLM(jobPrompt, res.artifact);
-          } catch (error) {
-            logError(`[workers] Grading failed for job ${job.data.dbJobId}:`, error);
-            gradingFailed = true;
-          }
-        }
-
-        // The job is successful only if agent execution succeeded, grading succeeded, and grade passed
-        const jobSucceeded = agentSucceeded && !gradingFailed && gradeResult.passed;
-
-        const delta = jobSucceeded ? job.data.payout : -FAIL_PENALTY;
-        await prisma.ledger.create({
-          data: {
-            agentId: s.id,
-            jobId: job.data.dbJobId,
-            delta,
-            reason: jobSucceeded ? 'payout' : 'fail',
-            qualityGrade: gradeResult.qualityScore || null, // Store score even for failures
-          },
-        });
-
-        const ttc = Math.floor((Date.now() - started) / 1000);
-        await prisma.agentState.update({
-          where: { id: s.id },
-          data: {
-            balance: { increment: delta },
-            attempts: { increment: 1 },
-            wins: { increment: jobSucceeded ? 1 : 0 },
-            meanTtcSec: Math.floor((s.meanTtcSec * s.attempts + ttc) / (s.attempts + 1)),
-          },
-        });
-
-        return {
-          ok: jobSucceeded,
-          artifact: res.artifact,
-          toolsUsed: res.toolsUsed ?? false,
-          newToolsCreated: res.newToolsCreated ?? false,
-          stepsUsed: res.stepsUsed ?? 0,
-          selectedTool: res.selectedTool ?? null,
-          builderRationale: res.builderRationale ?? null,
-          executionArgs: res.executionArgs ?? null,
-          toolOutputSnippet: res.toolOutputSnippet ?? null,
-          summarySource: res.summarySource ?? null,
-          totalToolsAvailable: res.totalToolsAvailable ?? null,
-        };
-      },
-      {
-        connection: redis,
-        concurrency: 3,
-      }
-    );
-
-    agentWorkers.push(worker);
+      agentWorkers.push(worker);
+    }
+  } catch (error) {
+    logError('[workers] Error in startAgentWorkers:', error);
+    throw error; // Re-throw to be caught by startSystemProcesses
   }
 }
 
@@ -1271,16 +2526,18 @@ async function main() {
   jobQueue = new Queue('jobs', { connection: redis });
   await seedIfEmpty();
 
-  // Start HTTP server first so dashboard is immediately available
+  // Initialize system in paused state with some initial jobs for testing
+  log('[soup-runner] System starting in paused state...');
+  log('[soup-runner] Generating initial job batch...');
+
+  // Generate initial jobs but don't start workers - wait for completion
+  await generateJobs();
+  log('[soup-runner] Initial job batch generated successfully');
+
+  // Start HTTP server after initialization is complete
   await app.listen({ port: cfg.SOUP_RUNNER_PORT, host: '0.0.0.0' });
   log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT}`);
-
-  // Then start background processes (job generation, agents, etc.)
-  log('[soup-runner] Starting background processes...');
-  setInterval(generateJobs, 60_000);
-  generateJobs().catch(console.error); // Don't await, run in background
-  await startAgentWorkers();
-  setInterval(() => epochTick().catch(console.error), EPOCH_MINUTES * 60_000);
+  log('[soup-runner] System ready in paused state. Use dashboard or API to start processing.');
 }
 
 main().catch((e) => {

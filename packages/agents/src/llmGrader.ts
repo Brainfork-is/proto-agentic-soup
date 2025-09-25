@@ -71,7 +71,14 @@ export class LLMGrader {
       // Ignore parse failures – treat as plain text response
     }
 
-    const trimmedAnswer = (answerText || '').trim();
+    // Convert answerText to string if it's not already
+    const answerString =
+      typeof answerText === 'string'
+        ? answerText
+        : typeof answerText === 'object'
+          ? JSON.stringify(answerText)
+          : String(answerText || '');
+    const trimmedAnswer = answerString.trim();
 
     // Quick basic checks first
     if (!trimmedAnswer) {
