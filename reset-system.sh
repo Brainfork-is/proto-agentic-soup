@@ -97,11 +97,14 @@ if [ -f "$DB_FILE" ]; then
         DELETE FROM Swarm;
         DELETE FROM Blueprint;
         DELETE FROM Edge;
+        DELETE FROM AgentTool;
+        DELETE FROM AgentMemory;
+        DELETE FROM SwarmMemory;
     "
     
     # Reset any auto-increment sequences (only if table exists)
     sqlite3 src/prisma/dev.db "
-        DELETE FROM sqlite_sequence WHERE name IN ('Ledger', 'Job', 'AgentState', 'Swarm', 'Blueprint', 'Edge');
+        DELETE FROM sqlite_sequence WHERE name IN ('Ledger', 'Job', 'AgentState', 'Swarm', 'Blueprint', 'Edge', 'AgentTool', 'AgentMemory', 'SwarmMemory');
     " 2>/dev/null || echo "   Note: No auto-increment sequences to reset"
     
     echo "✅ Database tables cleared"

@@ -4,11 +4,11 @@
  */
 
 import { createReactAgent } from '@langchain/langgraph/prebuilt';
-import { PatchedChatVertexAI } from './patchedVertexAI';
+import { createVertexAILangChainLLM } from './llm';
 import { WikipediaQueryRun } from '@langchain/community/tools/wikipedia_query_run';
 import { WebBrowser } from 'langchain/tools/webbrowser';
 import { SerpAPI } from '@langchain/community/tools/serpapi';
-import { JobData, log, logError, getVertexTokenLimit } from '@soup/common';
+import { JobData, log, logError } from '@soup/common';
 
 // Agent archetype types
 export type AgentArchetype =
@@ -18,43 +18,33 @@ export type AgentArchetype =
   | 'google-trends'
   | 'tool-builder';
 
-// Create Vertex AI LLM instance
-function createVertexAILLM() {
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-  const model = process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash';
-  const temperature = parseFloat(process.env.VERTEX_AI_TEMPERATURE || '0.7');
-  const maxOutputTokens = getVertexTokenLimit('agent');
-
-  if (!projectId) {
-    throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
+// Create LLM instance with fallback for non-Vertex providers
+function createLLMForTools() {
+  try {
+    return createVertexAILangChainLLM('agent');
+  } catch (error) {
+    // If LangChain model creation fails (e.g., with Ollama), return null
+    // Tools that require LangChain models will be skipped
+    console.warn(
+      '[SimpleReactAgent] LangChain model not available, some tools will be disabled:',
+      (error as Error).message
+    );
+    return null;
   }
-
-  return new PatchedChatVertexAI({
-    model,
-    temperature,
-    maxOutputTokens, // Use config-based limit (undefined = no limit)
-    authOptions: {
-      credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
-        ? undefined
-        : process.env.GOOGLE_CLOUD_CREDENTIALS
-          ? JSON.parse(Buffer.from(process.env.GOOGLE_CLOUD_CREDENTIALS, 'base64').toString())
-          : undefined,
-    },
-  });
 }
 
 // Create tools based on archetype
 function getToolsForArchetype(archetype: AgentArchetype) {
-  const llm = createVertexAILLM();
+  const llm = createLLMForTools();
 
   switch (archetype) {
     case 'llm-only':
       // No tools, just the LLM
       return [];
 
-    case 'web-browser':
+    case 'web-browser': {
       // Combination of search and browse capabilities
-      return [
+      const tools: any[] = [
         new SerpAPI(
           process.env.SERPAPI_KEY ||
             'f2851b0e9f2290428332cc7b2c7578968e376cfb72e012f5b96a8b000b8edb2f',
@@ -64,11 +54,20 @@ function getToolsForArchetype(archetype: AgentArchetype) {
             gl: 'us',
           }
         ),
-        new WebBrowser({
-          model: llm,
-          embeddings: null as any, // For browsing specific URLs found via search
-        }),
       ];
+
+      // Only add WebBrowser tool if LangChain model is available
+      if (llm) {
+        tools.push(
+          new WebBrowser({
+            model: llm,
+            embeddings: null as any, // For browsing specific URLs found via search
+          })
+        );
+      }
+
+      return tools;
+    }
 
     case 'wikipedia':
       // Wikipedia search tool
@@ -102,8 +101,16 @@ export class SimpleReactAgent {
     this.id = id;
     this.archetype = archetype;
 
-    // Create the LLM
-    const llm = createVertexAILLM();
+    // Create the LLM for the agent - need LangChain compatible model
+    // Try to get LangChain model, fallback to basic agent if not available
+    let llm: any;
+    try {
+      llm = createVertexAILangChainLLM('agent');
+    } catch (error) {
+      throw new Error(
+        `Cannot create agent: LangChain model required for agent creation but not available for current provider. Error: ${(error as Error).message}`
+      );
+    }
 
     // Get tools for this archetype
     const tools = getToolsForArchetype(archetype);

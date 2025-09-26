@@ -10,7 +10,22 @@ dotenvConfig({ path: [envPath, rootEnvPath] });
 
 const commonSchema = z.object({
   NODE_ENV: z.string().optional().default('development'),
-  LLM_PROVIDER: z.string().optional().default(''),
+
+  // Multi-Provider LLM Configuration
+  LLM_PROVIDER: z.enum(['vertex', 'ollama', 'auto', '']).optional().default('vertex'),
+  OLLAMA_URL: z.string().url().optional().default('http://localhost:11434'),
+  DEFAULT_MODEL: z.string().optional().default('gemini-1.5-flash'),
+
+  // Component-specific LLM configurations (format: "provider:model:temperature:maxTokens")
+  LLM_CONFIG_NAME_GENERATOR: z.string().optional(),
+  LLM_CONFIG_JOB_GENERATOR: z.string().optional(),
+  LLM_CONFIG_RESULT_GRADER: z.string().optional(),
+  LLM_CONFIG_AGENT: z.string().optional(),
+  LLM_CONFIG_CODE_GENERATOR: z.string().optional(),
+  LLM_CONFIG_SWARM_SYNTHESIZER: z.string().optional(),
+  LLM_CONFIG_TOOL_BUILDER: z.string().optional(),
+
+  // Legacy Configuration (maintained for backward compatibility)
   OPENAI_API_KEY: z.string().optional().default(''),
   GOOGLE_CLOUD_PROJECT: z.string().optional().default(''),
   GOOGLE_CLOUD_LOCATION: z.string().optional().default('us-central1'),
@@ -19,7 +34,7 @@ const commonSchema = z.object({
   LLM_MAX_TOKENS_PER_HOUR: z.coerce.number().optional().default(100000),
   LLM_MAX_TOKENS_PER_AGENT: z.coerce.number().optional().default(1000),
 
-  // Vertex AI Model Configuration
+  // Vertex AI Model Configuration (backward compatibility)
   VERTEX_AI_MODEL: z.string().optional().default('gemini-1.5-flash'),
   VERTEX_AI_TEMPERATURE: z.coerce.number().optional().default(0.7),
 
@@ -96,15 +111,19 @@ const runnerSchema = z.object({
     .transform((v) => v === '1'),
 
   // Swarm configuration
-  USE_SWARMS: z
-    .union([z.literal('1'), z.literal('0')])
-    .optional()
-    .default('0')
-    .transform((v) => v === '1'), // Whether to use swarms instead of individual agents
   SWARM_COUNT: z.coerce.number().optional().default(5), // Number of swarms to create
   AGENTS_PER_SWARM: z.coerce.number().optional().default(3), // Number of agents per swarm
   MCP_KNOWLEDGE_SERVER: z.string().optional().default(''),
   MCP_BEARER_TOKEN: z.string().optional().default(''),
+
+  // Model preloading configuration
+  PRELOAD_MODELS: z
+    .union([z.literal('1'), z.literal('0'), z.literal('true'), z.literal('false')])
+    .optional()
+    .default('1')
+    .transform((v) => v === '1' || v === 'true'),
+  PRELOAD_TIMEOUT_SECONDS: z.coerce.number().optional().default(90), // Timeout per model
+  PRELOAD_RETRY_ATTEMPTS: z.coerce.number().optional().default(2),
 });
 
 export type CommonConfig = z.infer<typeof commonSchema>;
@@ -141,7 +160,9 @@ export type TokenLimitComponent =
   | 'code_generator'
   | 'name_generator'
   | 'llm_grader'
-  | 'agent';
+  | 'agent'
+  | 'swarm_synthesizer'
+  | 'result_grader';
 
 export function getVertexTokenLimit(
   component: TokenLimitComponent,
@@ -155,7 +176,9 @@ export function getVertexTokenLimit(
     code_generator: 'VERTEX_AI_MAX_OUTPUT_TOKENS_CODE_GENERATOR',
     name_generator: 'VERTEX_AI_MAX_OUTPUT_TOKENS_NAME_GENERATOR',
     llm_grader: 'VERTEX_AI_MAX_OUTPUT_TOKENS_LLM_GRADER',
+    result_grader: 'VERTEX_AI_MAX_OUTPUT_TOKENS_LLM_GRADER', // Alias for llm_grader
     agent: 'VERTEX_AI_MAX_OUTPUT_TOKENS_AGENT',
+    swarm_synthesizer: 'VERTEX_AI_MAX_OUTPUT_TOKENS_AGENT', // Use agent tokens for swarm synthesizer
   };
 
   const componentKey = componentEnvMap[component];

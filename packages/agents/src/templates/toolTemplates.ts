@@ -45,7 +45,8 @@ const {{TOOL_NAME}} = {
 
       const output = {
         success: true,
-        {{SUCCESS_FIELDS}}
+        result: {{SUCCESS_FIELDS}},
+        toolName: '{{TOOL_NAME}}'
       };
 
       return JSON.stringify(output);
@@ -90,7 +91,8 @@ export const {{TOOL_NAME}} = {
       
       const output = {
         success: true,
-        {{CALCULATION_FIELDS}}
+        result: {{CALCULATION_FIELDS}},
+        toolName: '{{TOOL_NAME}}'
       };
 
       return JSON.stringify(output);
@@ -132,7 +134,8 @@ export const {{TOOL_NAME}} = {
       
       const output = {
         success: true,
-        {{ANALYSIS_FIELDS}}
+        result: {{ANALYSIS_FIELDS}},
+        toolName: '{{TOOL_NAME}}'
       };
 
       return JSON.stringify(output);
@@ -173,7 +176,8 @@ export const {{TOOL_NAME}} = {
       
       const output = {
         success: true,
-        {{VALIDATION_FIELDS}}
+        result: {{VALIDATION_FIELDS}},
+        toolName: '{{TOOL_NAME}}'
       };
 
       return JSON.stringify(output);
@@ -217,7 +221,8 @@ export const {{TOOL_NAME}} = {
 
       const output = {
         success: true,
-        {{FORMAT_FIELDS}}
+        result: {{FORMAT_FIELDS}},
+        toolName: '{{TOOL_NAME}}'
       };
 
       return JSON.stringify(output);
@@ -267,7 +272,8 @@ const {{TOOL_NAME}} = {
 
       const output = {
         success: true,
-        {{RESEARCH_FIELDS}}
+        result: {{RESEARCH_FIELDS}},
+        toolName: '{{TOOL_NAME}}'
       };
 
       return JSON.stringify(output);

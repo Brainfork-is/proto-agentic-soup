@@ -14,6 +14,7 @@ const ALLOWED_PACKAGES = [
   'axios',
   'cheerio',
   'date-fns',
+  'date-fns-tz',
   'lodash',
   'uuid',
   'numeral',
@@ -237,46 +238,143 @@ export function createToolContext(): vm.Context {
 }
 
 /**
- * Execute tool code in sandboxed environment
+ * Execute tool code in sandboxed environment with robust timeout protection
  */
 export async function executeToolInSandbox(
   code: string,
   toolName: string,
-  params: any
+  params: any,
+  timeoutMs: number = 10000 // Reduced to 10 seconds
 ): Promise<string> {
-  try {
-    const context = createToolContext();
+  return new Promise((resolve, reject) => {
+    let isResolved = false;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+    let intervalHandle: ReturnType<typeof setInterval>;
 
-    // Add the params to the context
-    (context as any).params = params;
+    const cleanup = () => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (intervalHandle) clearInterval(intervalHandle);
+    };
 
-    // Wrap the code to capture the exported tool
-    const wrappedCode = `
-      ${code}
+    const resolveOnce = (value: string) => {
+      if (!isResolved) {
+        isResolved = true;
+        cleanup();
+        resolve(value);
+      }
+    };
 
-      // Execute the tool if it exists
-      (async () => {
-        const tool = typeof ${toolName} !== 'undefined' ? ${toolName} : module.exports;
-        if (tool && typeof tool.invoke === 'function') {
-          return await tool.invoke(params);
-        } else {
-          throw new Error('Tool ${toolName} not found or does not have invoke method');
+    const rejectOnce = (error: Error) => {
+      if (!isResolved) {
+        isResolved = true;
+        cleanup();
+        reject(error);
+      }
+    };
+
+    // Set up hard timeout
+    timeoutHandle = setTimeout(() => {
+      rejectOnce(
+        new Error(`Tool execution timed out after ${timeoutMs}ms (possible infinite loop)`)
+      );
+    }, timeoutMs);
+
+    // Set up watchdog to monitor execution
+    const startTime = Date.now();
+    let lastCheckTime = startTime;
+    intervalHandle = setInterval(() => {
+      if (isResolved) return;
+
+      const now = Date.now();
+      const totalTime = now - startTime;
+      const intervalTime = now - lastCheckTime;
+
+      // If we haven't yielded control in 2 seconds, consider it a potential infinite loop
+      if (intervalTime > 2000) {
+        logError(
+          `[ToolEnv] Tool ${toolName} may be in infinite loop (no yield for ${intervalTime}ms)`
+        );
+      }
+
+      lastCheckTime = now;
+
+      // Additional safety: kill after 15 seconds regardless
+      if (totalTime > 15000) {
+        rejectOnce(new Error(`Tool execution killed after ${totalTime}ms (safety limit exceeded)`));
+      }
+    }, 500); // Check every 500ms
+
+    try {
+      const context = createToolContext();
+
+      // Add execution monitoring to the context
+      let operationCount = 0;
+      const maxOperations = 100000; // Limit on operations to prevent infinite loops
+
+      // Wrap common operations to detect infinite loops
+      const originalSetTimeout = (context as any).setTimeout;
+      (context as any).setTimeout = (fn: (...args: any[]) => void, ms: number) => {
+        if (++operationCount > maxOperations) {
+          throw new Error(`Tool exceeded maximum operations limit (${maxOperations})`);
         }
-      })();
-    `;
+        return originalSetTimeout(fn, Math.min(ms, 1000)); // Cap individual timeouts at 1 second
+      };
 
-    const script = new vm.Script(wrappedCode);
-    const result = await script.runInContext(context, {
-      timeout: 30000, // 30 second timeout
-      displayErrors: true,
-    });
+      // Add the params to the context
+      (context as any).params = params;
 
-    return result;
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Unknown execution error';
-    logError(`[ToolEnv] Execution error for ${toolName}: ${errorMsg}`);
-    throw error;
-  }
+      // Wrap the code to capture the exported tool with execution tracking
+      const wrappedCode = `
+        let __operationCount = 0;
+        const __maxOperations = ${maxOperations};
+
+        // Monkey patch common loop-creating functions
+        const originalWhile = global.while;
+        const originalFor = global.for;
+
+        ${code}
+
+        // Execute the tool if it exists
+        (async () => {
+          try {
+            const tool = typeof ${toolName} !== 'undefined' ? ${toolName} : module.exports;
+            if (tool && typeof tool.invoke === 'function') {
+              const result = await tool.invoke(params);
+              return typeof result === 'string' ? result : JSON.stringify(result);
+            } else {
+              throw new Error('Tool ${toolName} not found or does not have invoke method');
+            }
+          } catch (error) {
+            throw error;
+          }
+        })();
+      `;
+
+      const script = new vm.Script(wrappedCode);
+
+      try {
+        // Execute with shorter VM timeout
+        const vmResult = script.runInContext(context, {
+          timeout: Math.min(timeoutMs - 1000, 8000), // VM timeout shorter than our timeout
+          displayErrors: true,
+        });
+
+        // Handle the promise returned by the async IIFE
+        if (vmResult && typeof vmResult.then === 'function') {
+          vmResult.then(resolveOnce).catch(rejectOnce);
+        } else {
+          resolveOnce(vmResult);
+        }
+      } catch (vmError) {
+        const errorMsg = vmError instanceof Error ? vmError.message : 'VM execution error';
+        rejectOnce(new Error(`VM execution failed: ${errorMsg}`));
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown execution error';
+      logError(`[ToolEnv] Execution setup error for ${toolName}: ${errorMsg}`);
+      rejectOnce(new Error(`Tool setup failed: ${errorMsg}`));
+    }
+  });
 }
 
 /**
@@ -297,9 +395,75 @@ export function validateToolCode(code: string): { valid: boolean; errors: string
     { pattern: /global\./g, message: 'Global object access is not allowed' },
   ];
 
+  // Check for potential infinite loop patterns
+  const infiniteLoopPatterns = [
+    {
+      pattern: /while\s*\(\s*true\s*\)/g,
+      message: 'Potential infinite loop: while(true) without proper exit condition',
+    },
+    {
+      pattern: /for\s*\(\s*;\s*;\s*\)/g,
+      message: 'Potential infinite loop: for(;;) without proper exit condition',
+    },
+    {
+      pattern: /while\s*\([^)]*!==.*\)/g,
+      message: 'Suspicious while loop condition that may never be false',
+    },
+    {
+      pattern: /while\s*\([^)]*getDay.*!==.*getDay/g,
+      message: 'Date comparison in while loop may cause infinite loop',
+    },
+    {
+      pattern: /new\s+Date\s*\([^)]*Day.*12:00:00/g,
+      message: 'Suspicious date construction that may cause parsing errors',
+    },
+    // Enhanced infinite loop detection
+    {
+      pattern: /while\s*\([^{]*Date[^{]*\)/g,
+      message: 'Date-based while loop may cause infinite loop',
+    },
+    {
+      pattern: /while\s*\([^{]*\.getDay\(\)\s*!==\s*targetDay/g,
+      message: 'getDay() comparison in while loop is dangerous',
+    },
+    {
+      pattern: /while\s*\([^{]*nextOccurrenceDate\.getDay\(\)/g,
+      message: 'Date.getDay() in while condition may loop infinitely',
+    },
+    {
+      pattern: /while\s*\([^{]*\+\+[^{]*\)/g,
+      message: 'Increment operation in while condition may be unsafe',
+    },
+    {
+      pattern: /while\s*\([^{]*--[^{]*\)/g,
+      message: 'Decrement operation in while condition may be unsafe',
+    },
+    {
+      pattern: /setDate\([^)]*\+\s*1[^)]*\)/g,
+      message: 'Date.setDate() with increment inside loop may be unsafe',
+    },
+    // Detect recursive function calls that could stack overflow
+    {
+      pattern: /function\s+(\w+)[^{]*\{[^}]*\1\s*\(/g,
+      message: 'Recursive function call detected - ensure proper base case',
+    },
+    // Detect setTimeout/setInterval without clearing
+    {
+      pattern: /setTimeout\s*\([^}]*setTimeout/g,
+      message: 'Nested setTimeout may create infinite chain',
+    },
+    { pattern: /setInterval\s*\(/g, message: 'setInterval usage - ensure clearInterval is called' },
+  ];
+
   for (const { pattern, message } of dangerousPatterns) {
     if (pattern.test(code)) {
       errors.push(message);
+    }
+  }
+
+  for (const { pattern, message } of infiniteLoopPatterns) {
+    if (pattern.test(code)) {
+      errors.push(`WARNING: ${message}`);
     }
   }
 
@@ -312,9 +476,24 @@ export function validateToolCode(code: string): { valid: boolean; errors: string
     errors.push('Tool must export itself');
   }
 
+  // Additional safety check: reject tools with high-risk patterns entirely
+  const highRiskPatterns = errors.filter(
+    (error) =>
+      error.includes('infinite loop') ||
+      error.includes('getDay() in while condition') ||
+      error.includes('Date-based while loop')
+  );
+
+  const hasHighRiskPatterns = highRiskPatterns.length > 0;
+
   return {
-    valid: errors.length === 0,
-    errors,
+    valid: errors.length === 0 && !hasHighRiskPatterns,
+    errors: hasHighRiskPatterns
+      ? [
+          ...errors,
+          'CRITICAL: Tool contains high-risk infinite loop patterns and will not be created',
+        ]
+      : errors,
   };
 }
 

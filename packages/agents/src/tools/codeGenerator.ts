@@ -9,6 +9,7 @@ import { selectTemplate } from '../templates/toolTemplates';
 import crypto from 'crypto';
 import path from 'path';
 import { getToolCapabilities } from './toolExecutionEnv';
+import * as acorn from 'acorn';
 
 export interface GeneratedToolRequest {
   taskDescription: string;
@@ -186,40 +187,107 @@ export class CodeGeneratorTool {
     toolName: string,
     expectedInputs: Record<string, string>,
     expectedOutput: string,
-    template: any
+    _template: any
   ): Promise<string> {
     const capabilities = getToolCapabilities();
-    const prompt = `You are a JavaScript code generator. Produce a powerful, data-driven tool that uses real data and external resources.
+    const prompt = `You are a specialized JavaScript tool generator for LangChain/LangGraph agents. Create production-ready, LangChain-compatible tools.
 
 TASK DESCRIPTION: ${taskDescription}
 
 AVAILABLE CAPABILITIES:
 ${capabilities}
 
-REQUIREMENTS:
-1. Export a constant named ${toolName} with properties { name, description, async invoke }.
-2. Ensure invoke accepts a single params object containing ${JSON.stringify(expectedInputs, null, 2)}.
-3. Produce the described output format (${expectedOutput}) and return it as JSON.stringify(...).
-4. USE REAL DATA: Access web content, APIs, or process actual information. DO NOT generate dummy/mock data.
-5. Make the tool reusable: accept parameters, perform real operations based on inputs.
-6. Validate inputs and surface clear error messages; always catch errors.
-7. Leverage available NPM packages and web research capabilities to provide valuable results.
-8. If the task requires external data, use webResearch() or fetchWebContent() to get it.
-9. Process and transform real data to provide meaningful outputs.
+LANGCHAIN COMPATIBILITY REQUIREMENTS:
+This tool will be used by LangChain ReAct agents, so it must:
+1. Follow LangChain's DynamicTool patterns
+2. Return structured JSON that LangChain agents can parse
+3. Have clear, descriptive names and descriptions for agent reasoning
+4. Include comprehensive error handling for agent reliability
 
-IMPORTANT:
-- DO NOT create placeholder, dummy, or mock data. Always fetch or compute real information.
-- Use webResearch(query) for general web queries and information gathering.
-- Use fetchWebContent(url) for fetching specific URLs.
-- Use available NPM packages like axios, cheerio, date-fns, lodash, etc.
-- Return actual processed results, not sample data.
-- Use CommonJS syntax: const package = require('package'); and module.exports = toolName;
-- The webResearch and fetchWebContent functions are globally available in the execution environment.
+CRITICAL RETURN STRUCTURE:
+Success Response:
+{
+  "success": true,
+  "result": <actual data>,
+  "toolName": "${toolName}"
+}
 
-REFERENCE TEMPLATE (adapt and enhance with real data access):
-${template.pattern}
+Error Response:
+{
+  "success": false,
+  "error": "<descriptive error message>",
+  "toolName": "${toolName}"
+}
 
-The code you return must be plain JavaScript (no markdown fences or commentary).`;
+TOOL SPECIFICATION:
+- Name: ${toolName}
+- Input Parameters: ${JSON.stringify(expectedInputs, null, 2)}
+- Expected Output: ${expectedOutput}
+- Must work seamlessly with LangChain agents and LangGraph workflows
+
+IMPLEMENTATION REQUIREMENTS:
+1. **Real Data Only**: Use actual APIs, web content, or computed data - never mock/placeholder data
+2. **LangChain Integration**: Tool must be easily callable by LangChain agents
+3. **Robust Error Handling**: Catch all errors and return structured error responses
+4. **Input Validation**: Validate all parameters with clear error messages
+5. **Comprehensive Logging**: Use descriptive variable names and clear logic flow
+6. **Reusable Design**: Make the tool generic and reusable for similar tasks
+
+JAVASCRIPT BEST PRACTICES:
+- Use proper syntax: "case value:" not "case value ="
+- Quote object properties with spaces: {"property name": value}
+- No duplicate declarations in same scope
+- Escape quotes properly: "text with \\"quotes\\""
+- Use : for object properties, = for assignments
+
+LANGCHAIN TOOL TEMPLATE:
+const ${toolName} = {
+  name: '${toolName}',
+  description: 'Clear description that helps LangChain agents understand when to use this tool',
+  async invoke(params) {
+    try {
+      // Extract and validate input parameters
+      const { /* destructure expected inputs */ } = params;
+
+      // Comprehensive input validation with helpful error messages
+      // if (!requiredParam) throw new Error('requiredParam is required for...');
+
+      // Main processing logic using real data sources
+      // Use webResearch(), fetchWebContent(), or npm packages as needed
+      const result = /* your implementation */;
+
+      // Return structured success response
+      return JSON.stringify({
+        success: true,
+        result: result,
+        toolName: '${toolName}'
+      });
+
+    } catch (error) {
+      // Structured error response for LangChain agents
+      return JSON.stringify({
+        success: false,
+        error: error.message || 'Tool execution failed',
+        toolName: '${toolName}'
+      });
+    }
+  }
+};
+
+module.exports = ${toolName};
+
+DATA ACCESS FUNCTIONS (globally available):
+- webResearch(query): Search web for information
+- fetchWebContent(url): Fetch content from specific URLs
+- Available NPM packages: axios, cheerio, lodash, moment, validator, jsonpath, csv-parse, marked, etc.
+
+QUALITY STANDARDS:
+- Process real, current data whenever possible
+- Provide actionable, complete results
+- Handle edge cases gracefully
+- Make tools that LangChain agents will want to use repeatedly
+
+Return only the JavaScript code (no markdown formatting or explanations).`;
 
     const response = await this.llm.invoke(prompt);
     let generatedCode = response.content as string;
@@ -231,10 +299,109 @@ The code you return must be plain JavaScript (no markdown fences or commentary).
       .replace(/```\s*$/, '')
       .trim();
 
-    // Basic syntax validation
+    // AST-based syntax validation first
+    const syntaxValidation = this.validateJavaScriptSyntax(generatedCode, toolName);
+    if (!syntaxValidation.valid) {
+      throw new Error(syntaxValidation.error || 'Syntax validation failed');
+    }
+
+    // Additional validation checks
     this.validateGeneratedCode(generatedCode, toolName);
 
     return generatedCode;
+  }
+
+  private validateJavaScriptSyntax(
+    code: string,
+    toolName: string
+  ): { valid: boolean; error?: string } {
+    try {
+      // Parse the code to check for syntax errors
+      acorn.parse(code, {
+        ecmaVersion: 2020,
+        sourceType: 'script',
+        allowReturnOutsideFunction: true,
+      });
+
+      // Additional validations
+      this.validateRequiredStructure(code, toolName);
+      this.detectCommonSyntaxErrors(code);
+
+      return { valid: true };
+    } catch (syntaxError: any) {
+      return {
+        valid: false,
+        error: `Syntax error: ${syntaxError.message}`,
+      };
+    }
+  }
+
+  private validateRequiredStructure(code: string, _toolName: string): void {
+    // Check for proper export structure
+    const hasModuleExports = code.includes('module.exports');
+    const hasExport = code.includes('export');
+
+    if (!hasModuleExports && !hasExport) {
+      throw new Error('Code must include module.exports or export statement');
+    }
+
+    // Check for invoke method
+    const hasInvokeMethod = /invoke\s*[:()]/.test(code);
+    if (!hasInvokeMethod) {
+      throw new Error('Code must include an invoke method');
+    }
+
+    // Check for proper return structure in success case
+    const hasSuccessReturn = code.includes('success: true') && code.includes('toolName:');
+    if (!hasSuccessReturn) {
+      throw new Error('Code must return {success: true, result: data, toolName: "name"} structure');
+    }
+
+    // Check for proper return structure in error case
+    const hasErrorReturn = code.includes('success: false') && code.includes('error:');
+    if (!hasErrorReturn) {
+      throw new Error(
+        'Code must return {success: false, error: message, toolName: "name"} structure in catch blocks'
+      );
+    }
+  }
+
+  private detectCommonSyntaxErrors(code: string): void {
+    const errors: string[] = [];
+
+    // Check for common patterns from the logs
+    if (code.includes('case ') && / case\s+[^:]+\s*=/.test(code)) {
+      errors.push('Switch case using = instead of :');
+    }
+
+    // Check for unescaped quotes in strings
+    if (/"[^"]*"[^"]*"[^"]*:/.test(code)) {
+      errors.push('Potential string escaping issue - nested quotes not properly escaped');
+    }
+
+    // Check for duplicate const declarations
+    const constMatches = code.match(/const\s+(\w+)/g);
+    if (constMatches) {
+      const constNames = constMatches.map((m) => m.replace('const ', ''));
+      const duplicates = constNames.filter((name, index) => constNames.indexOf(name) !== index);
+      if (duplicates.length > 0) {
+        errors.push(`Duplicate const declarations: ${duplicates.join(', ')}`);
+      }
+    }
+
+    // Check for malformed object properties
+    if (/\w+\s+\w+\s*:/.test(code) && !/["']\w+\s+\w+["']\s*:/.test(code)) {
+      errors.push('Object property names with spaces must be quoted');
+    }
+
+    // Check for missing colons in object properties
+    if (/\{\s*\w+\s*=/.test(code)) {
+      errors.push('Object properties must use : not = for assignment');
+    }
+
+    if (errors.length > 0) {
+      throw new Error(`Common syntax errors detected: ${errors.join(', ')}`);
+    }
   }
 
   private validateGeneratedCode(code: string, _expectedToolName: string): void {

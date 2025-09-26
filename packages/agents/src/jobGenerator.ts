@@ -3,8 +3,8 @@
  * Creates realistic professional work assignments for AI agents
  */
 
-import { PatchedChatVertexAI } from './patchedVertexAI';
-import { log, logError, getVertexTokenLimit } from '@soup/common';
+import { createLLMProvider, LLMProvider } from './llm';
+import { log, logError } from '@soup/common';
 
 export interface Job {
   prompt: string;
@@ -17,31 +17,12 @@ interface JobBatch {
 }
 
 export class JobGenerator {
-  private llm: PatchedChatVertexAI;
+  private llm: LLMProvider;
   private jobQueue: Job[] = [];
   private batchSize = 10;
 
   constructor() {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-
-    if (!projectId) {
-      throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
-    }
-
-    const maxOutputTokens = getVertexTokenLimit('job_generator');
-
-    this.llm = new PatchedChatVertexAI({
-      model: process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash',
-      temperature: 0.9, // High temperature for variety
-      maxOutputTokens, // Use config-based limit (undefined = no limit)
-      authOptions: {
-        credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
-          ? undefined
-          : process.env.GOOGLE_CLOUD_CREDENTIALS
-            ? JSON.parse(Buffer.from(process.env.GOOGLE_CLOUD_CREDENTIALS, 'base64').toString())
-            : undefined,
-      },
-    });
+    this.llm = createLLMProvider('job_generator');
   }
 
   async generateJob(): Promise<Job> {

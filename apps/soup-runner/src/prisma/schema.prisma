@@ -38,6 +38,7 @@ model Swarm {
   agents      AgentState[]
   jobs        Job[]
   ledgerEntries Ledger[]
+  memories    SwarmMemory[]
 }
 
 model AgentState {
@@ -92,4 +93,63 @@ model Edge {
   toId   String
   topic  String
   ts     DateTime @default(now())
+}
+
+// Tool Memory System - Agent-specific tool libraries
+model AgentTool {
+  id            String   @id @default(cuid())
+  agentId       String   // Owner agent ID
+  toolName      String   // Unique tool name
+  toolCode      String   // The actual tool implementation
+  description   String   // What the tool does
+  category      String   // Tool category (math, web_research, etc.)
+  successCount  Int      @default(0) // How many times it succeeded
+  failureCount  Int      @default(0) // How many times it failed
+  avgQuality    Float    @default(0.0) // Average quality score
+  lastUsed      DateTime @default(now())
+  createdAt     DateTime @default(now())
+  embedding     String?  // Vector embedding for similarity search
+
+  // Compound index for efficient lookups
+  @@unique([agentId, toolName])
+  @@index([agentId, category])
+  @@index([agentId, successCount])
+}
+
+// Agent Memory System - General experiences and learnings
+model AgentMemory {
+  id          String   @id @default(cuid())
+  agentId     String   // Owner agent ID
+  memoryType  String   // Type: "experience", "learning", "strategy", "failure"
+  content     String   // The memory content
+  context     String   // Context when memory was created
+  importance  Float    @default(0.5) // How important this memory is (0-1)
+  accessCount Int      @default(0) // How often accessed
+  lastAccess  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  embedding   String?  // Vector embedding for similarity search
+
+  @@index([agentId, memoryType])
+  @@index([agentId, importance])
+  @@index([agentId, lastAccess])
+}
+
+// Swarm Memory System - Collective knowledge at swarm level
+model SwarmMemory {
+  id          String   @id @default(cuid())
+  swarmId     String   // Owner swarm ID
+  memoryType  String   // Type: "strategy", "pattern", "best_practice", "avoid"
+  content     String   // The memory content
+  context     String   // Context when memory was created
+  importance  Float    @default(0.5) // How important this memory is (0-1)
+  accessCount Int      @default(0) // How often accessed
+  lastAccess  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  embedding   String?  // Vector embedding for similarity search
+
+  // Relations
+  swarm       Swarm    @relation(fields: [swarmId], references: [id])
+
+  @@index([swarmId, memoryType])
+  @@index([swarmId, importance])
 }

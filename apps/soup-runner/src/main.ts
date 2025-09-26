@@ -10,8 +10,15 @@ import path from 'path';
 const cfg = loadRunnerConfig();
 
 // Import agents after config is loaded to ensure env vars are available
-import { createAgentForBlueprint, jobGenerator, llmGrader, createSwarmAgent } from '@soup/agents';
+import {
+  createAgentForBlueprint,
+  jobGenerator,
+  llmGrader,
+  createSwarmAgent,
+  ToolBuilderAgent,
+} from '@soup/agents';
 import { NameGenerator } from '@soup/agents';
+import { ModelPreloader } from '@soup/agents';
 import type { SwarmConfig } from '@soup/agents';
 const BOOTSTRAP = cfg.SOUP_BOOTSTRAP;
 
@@ -126,6 +133,9 @@ app.post('/api/system/reset', async (_request, _reply) => {
       await prisma.blueprint.deleteMany({});
       log('[System] Database reset complete');
 
+      // Preload models before reseeding (name generation needs LLM)
+      await preloadOllamaModels();
+
       // Reseed the database with new agents/swarms
       log('[System] Reseeding agents and swarms...');
       await seedIfEmpty();
@@ -217,39 +227,229 @@ async function stopSystemProcesses() {
   log('[System] All system processes stopped');
 }
 
-app.get('/leaderboard', async () => {
-  const USE_SWARMS = cfg.USE_SWARMS;
+async function preloadOllamaModels() {
+  try {
+    // Check if model preloading is enabled
+    if (!cfg.PRELOAD_MODELS) {
+      log('[System] Model preloading disabled via PRELOAD_MODELS=false');
+      return;
+    }
 
-  if (USE_SWARMS) {
-    // Show swarm leaderboard
-    const swarms = await prisma.swarm.findMany();
-    const rows = swarms
-      .map((x: any) => ({
-        swarmId: x.id,
-        name: x.name,
-        balance: x.balance,
-        wins: x.wins,
-        attempts: x.attempts,
-        reputation: x.reputation,
-        meanTtcSec: x.meanTtcSec,
-      }))
-      .sort((a: any, b: any) => b.balance - a.balance)
-      .slice(0, 20);
-    return { rows, mode: 'swarms' };
-  } else {
-    // Show individual agent leaderboard
-    const s = await prisma.agentState.findMany();
-    const rows = s
-      .map((x: any) => ({
-        agentId: x.id,
-        balance: x.balance,
-        wins: x.wins,
-        attempts: x.attempts,
-      }))
-      .sort((a: any, b: any) => b.balance - a.balance)
-      .slice(0, 20);
-    return { rows, mode: 'agents' };
+    // Get the Ollama URL from config
+    const ollamaUrl = cfg.OLLAMA_URL;
+
+    // Get unique models used by the system
+    const modelsToPreload = await getSystemModels();
+
+    if (modelsToPreload.length === 0) {
+      log('[System] No models to preload');
+      return;
+    }
+
+    log(
+      `[System] Preloading ${modelsToPreload.length} Ollama model(s): ${modelsToPreload.join(', ')}`
+    );
+
+    const preloader = new ModelPreloader(ollamaUrl);
+
+    // Get estimates to show expected time
+    const estimates = await preloader.getPreloadEstimate(modelsToPreload);
+    const totalEstimateMs = estimates.reduce((sum, e) => sum + e.estimatedMs, 0);
+
+    if (totalEstimateMs > 10000) {
+      log(`[System] Estimated preload time: ${Math.ceil(totalEstimateMs / 1000)}s`);
+    }
+
+    // Check which models are already loaded to avoid unnecessary work
+    const loadedModels = await preloader.getLoadedModels();
+    const modelsNeedingLoad = modelsToPreload.filter((model) => !loadedModels.includes(model));
+
+    if (modelsNeedingLoad.length === 0) {
+      log('[System] All required models are already loaded ✅');
+      return;
+    }
+
+    if (modelsNeedingLoad.length < modelsToPreload.length) {
+      log(
+        `[System] ${loadedModels.length} model(s) already loaded, preloading ${modelsNeedingLoad.length} additional model(s)`
+      );
+    }
+
+    // Preload the models that need loading using config values
+    const result = await preloader.preloadModels(modelsNeedingLoad, {
+      timeoutMs: cfg.PRELOAD_TIMEOUT_SECONDS * 1000,
+      retryAttempts: cfg.PRELOAD_RETRY_ATTEMPTS,
+      retryDelayMs: 2000,
+    });
+
+    if (result.success) {
+      log(
+        `[System] ✅ Model preloading completed successfully in ${Math.ceil(result.totalTime / 1000)}s`
+      );
+    } else {
+      logError(`[System] ⚠️  Model preloading partially failed:`, {
+        loaded: result.loadedModels,
+        failed: result.failedModels,
+        errors: result.errors,
+      });
+
+      // Don't fail startup if some models failed to preload, just log the warning
+      log(
+        '[System] Continuing with startup despite model preload failures - models will load on first use'
+      );
+    }
+  } catch (error) {
+    // Don't fail startup due to preload errors, just log and continue
+    logError('[System] Model preloading failed, continuing anyway:', error);
+    log('[System] Models will be loaded on first use (may cause initial delays)');
   }
+}
+
+async function getSystemModels(): Promise<string[]> {
+  try {
+    if (BOOTSTRAP) {
+      return []; // No models needed in bootstrap mode
+    }
+
+    const models = new Set<string>();
+
+    // Get models from agent blueprints (if any exist)
+    if (prisma) {
+      try {
+        const blueprints = await prisma.blueprint.findMany({
+          select: { llmModel: true },
+        });
+
+        for (const bp of blueprints) {
+          if (bp.llmModel && bp.llmModel.trim()) {
+            models.add(bp.llmModel.trim());
+          }
+        }
+      } catch (error) {
+        // Ignore database errors during early startup - table might not exist yet
+        log('[System] Blueprint table not ready, using environment defaults for model preloading');
+      }
+    }
+
+    // Add default models from environment
+    // These are needed especially during first startup when no blueprints exist yet
+    const defaultModel = process.env.LLM_MODEL || process.env.OLLAMA_MODEL || cfg.DEFAULT_MODEL;
+    if (defaultModel) {
+      models.add(defaultModel);
+    }
+
+    // Add grader model if different from default
+    const graderModel = process.env.GRADER_MODEL;
+    if (graderModel && graderModel !== defaultModel) {
+      models.add(graderModel);
+    }
+
+    // Add models from all component-specific LLM configs
+    const llmConfigs = [
+      'LLM_CONFIG_NAME_GENERATOR',
+      'LLM_CONFIG_JOB_GENERATOR',
+      'LLM_CONFIG_RESULT_GRADER',
+      'LLM_CONFIG_AGENT',
+      'LLM_CONFIG_CODE_GENERATOR',
+      'LLM_CONFIG_SWARM_SYNTHESIZER',
+      'LLM_CONFIG_TOOL_BUILDER',
+    ];
+
+    for (const configKey of llmConfigs) {
+      const configValue = process.env[configKey];
+      if (configValue && configValue.trim()) {
+        const parts = configValue.split(':');
+        // Format: "provider:model:temperature:maxTokens" or "provider:model:temperature"
+        // But model name might contain colons too (e.g., "gpt-oss:120b")
+        if (parts.length >= 2 && parts[0] === 'ollama') {
+          // Reconstruct model name by joining all parts except provider, temperature, and maxTokens
+          // Expected formats:
+          // - ollama:model:temp:tokens
+          // - ollama:model:temp:
+          // - ollama:model:temp
+          // - ollama:model:with:colons:temp:tokens
+
+          let modelName;
+          if (parts.length === 2) {
+            modelName = parts[1]; // ollama:model
+          } else if (parts.length === 3) {
+            modelName = parts[1]; // ollama:model:temp
+          } else if (parts.length === 4) {
+            modelName = parts[1]; // ollama:model:temp:tokens
+          } else {
+            // Handle complex model names like "gpt-oss:120b" in "ollama:gpt-oss:120b:0.9:"
+            // Take all parts except first (provider), last 2 (temp, tokens), if last is empty
+            const lastPart = parts[parts.length - 1];
+            const secondLastPart = parts[parts.length - 2];
+
+            if (lastPart === '' && !isNaN(parseFloat(secondLastPart))) {
+              // Format: "ollama:model:name:temp:" - join from index 1 to length-2
+              modelName = parts.slice(1, -2).join(':');
+            } else if (!isNaN(parseFloat(lastPart)) && !isNaN(parseFloat(secondLastPart))) {
+              // Format: "ollama:model:name:temp:tokens" - join from index 1 to length-2
+              modelName = parts.slice(1, -2).join(':');
+            } else {
+              // Format: "ollama:model:name:temp" - join from index 1 to length-1
+              modelName = parts.slice(1, -1).join(':');
+            }
+          }
+
+          models.add(modelName);
+          log(`[System] Found Ollama model in ${configKey}: ${modelName}`);
+        }
+      }
+    }
+
+    // Filter out any non-Ollama models since we're only preloading Ollama
+    const ollamaModels = Array.from(models).filter((model) => {
+      // If using mixed providers, we should only preload Ollama models
+      // Only filter out obvious cloud provider models, but keep local models like gpt-oss
+      return (
+        !model.includes('gemini') &&
+        !model.includes('gpt-4') &&
+        !model.includes('gpt-3.5') &&
+        !model.includes('claude') &&
+        !model.startsWith('text-') && // OpenAI completion models
+        !model.startsWith('davinci') && // OpenAI legacy models
+        !model.startsWith('curie') &&
+        !model.startsWith('babbage') &&
+        !model.startsWith('ada')
+      );
+    });
+
+    log(`[System] Detected ${models.size} total models: ${Array.from(models).join(', ')}`);
+    log(`[System] Filtered to ${ollamaModels.length} Ollama models: ${ollamaModels.join(', ')}`);
+
+    return ollamaModels;
+  } catch (error) {
+    logError('[System] Failed to get system models:', error);
+
+    // Fallback to common default models
+    const fallbackModel = cfg.DEFAULT_MODEL || 'llama3.2';
+    if (!fallbackModel.includes('gemini') && !fallbackModel.includes('gpt')) {
+      return [fallbackModel];
+    }
+
+    return [];
+  }
+}
+
+app.get('/leaderboard', async () => {
+  // Show swarm leaderboard (swarms-only mode)
+  const swarms = await prisma.swarm.findMany();
+  const rows = swarms
+    .map((x: any) => ({
+      swarmId: x.id,
+      name: x.name,
+      balance: x.balance,
+      wins: x.wins,
+      attempts: x.attempts,
+      reputation: x.reputation,
+      meanTtcSec: x.meanTtcSec,
+    }))
+    .sort((a: any, b: any) => b.balance - a.balance)
+    .slice(0, 20);
+  return { rows, mode: 'swarms' };
 });
 
 // Dashboard routes
@@ -1818,88 +2018,8 @@ async function seedIfEmpty() {
     return;
   }
 
-  // Check if we should use swarms or individual agents
-  const USE_SWARMS = cfg.USE_SWARMS;
-  const TEST_TOOL_BUILDER_ONLY = process.env.TEST_TOOL_BUILDER_ONLY === '1';
-
-  if (USE_SWARMS) {
-    await seedSwarms();
-    return;
-  }
-
-  // Create agents with tool-based archetypes (matching SimpleReactAgent types)
-  const agentArchetypes = TEST_TOOL_BUILDER_ONLY
-    ? ['tool-builder']
-    : ['wikipedia', 'llm-only', 'web-browser', 'google-trends', 'tool-builder'];
-
-  // Create variants - 60 total agents normally, or 20 tool-builder agents in test mode
-  const totalAgents = TEST_TOOL_BUILDER_ONLY ? 20 : 60;
-  const variantsPerArchetype = Math.floor(totalAgents / agentArchetypes.length);
-
-  log(
-    `[seed] Creating ${totalAgents} agents from ${agentArchetypes.length} archetypes${TEST_TOOL_BUILDER_ONLY ? ' (TOOL-BUILDER TEST MODE)' : ''}...`
-  );
-
-  // Create simple agent configurations
-  const agentConfigs = [];
-  for (let archetypeIndex = 0; archetypeIndex < agentArchetypes.length; archetypeIndex++) {
-    const archetypeType = agentArchetypes[archetypeIndex];
-
-    for (let variant = 0; variant < variantsPerArchetype; variant++) {
-      agentConfigs.push({
-        archetypeType,
-      });
-    }
-  }
-
-  // Generate all names in one batch LLM call
-  log(`[seed] Generating ${agentConfigs.length} fantasy names...`);
-  const names = await nameGenerator.generateNames(
-    agentConfigs.map((config) => ({
-      archetype: config.archetypeType,
-      temperature: 0.3, // Default temperature
-      tools: [], // Tools are determined by archetype
-    }))
-  );
-
-  // Now create agents with their names
-  for (let i = 0; i < agentConfigs.length; i++) {
-    const config = agentConfigs[i];
-    const agentName = names[i];
-
-    // Create blueprint for this archetype
-    const blueprint = await prisma.blueprint.create({
-      data: {
-        version: 1,
-        llmModel: 'gemini-1.5-flash',
-        temperature: 0.3,
-        tools: '', // Tools are determined by archetype implementation
-        archetype: config.archetypeType,
-        coopThreshold: 0.5,
-        minBalance: 30,
-        mutationRate: 0.15,
-        maxOffspring: 2,
-      },
-    });
-
-    // Create agent state with generated name
-    await prisma.agentState.create({
-      data: {
-        blueprintId: blueprint.id,
-        name: agentName.fullName,
-        balance: 10 + Math.floor(Math.random() * 5), // 10-14 starting balance variance
-        reputation: 0.4 + Math.random() * 0.2, // 0.4-0.6 starting reputation
-        attempts: 0,
-        wins: 0,
-        meanTtcSec: 0,
-        alive: true,
-      },
-    });
-
-    log(`[seed] Created "${agentName.fullName}": archetype=${config.archetypeType}`);
-  }
-
-  log(`[seed] Seeding complete: ${totalAgents} agents created`);
+  // Use swarms only (removed individual agent mode)
+  await seedSwarms();
 }
 
 async function seedSwarms() {
@@ -1911,13 +2031,11 @@ async function seedSwarms() {
   // Available agent archetypes for swarms
   const agentArchetypes = ['llm-only', 'web-browser', 'wikipedia', 'google-trends', 'tool-builder'];
 
+  // Pre-generate all swarm configurations
+  const swarmConfigs = [];
+
   for (let i = 0; i < SWARM_COUNT; i++) {
-    // Generate fantasy swarm name
-    const swarmNames = await nameGenerator.generateNames([
-      { archetype: 'swarm', temperature: 0.7, tools: [] },
-    ]);
-    const swarmName = swarmNames[0];
-    const swarmId = `swarm_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const swarmId = `swarm_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
 
     // Create random selection of agent types for this swarm
     const swarmArchetypes = [];
@@ -1926,14 +2044,34 @@ async function seedSwarms() {
       swarmArchetypes.push(randomArchetype);
     }
 
+    swarmConfigs.push({
+      swarmId,
+      archetypes: swarmArchetypes,
+    });
+  }
+
+  // Generate swarm names in 1 batch call instead of 20 individual calls
+  log(`[seedSwarms] Generating ${SWARM_COUNT} swarm names in batch...`);
+  const swarmNameConfigs = Array(SWARM_COUNT).fill({
+    archetype: 'swarm',
+    temperature: 0.7,
+    tools: [],
+  });
+  const swarmNames = await nameGenerator.generateNames(swarmNameConfigs);
+
+  // Now create swarms and agents with pre-generated names
+  for (let i = 0; i < SWARM_COUNT; i++) {
+    const swarmConfig = swarmConfigs[i];
+    const swarmName = swarmNames[i];
+
     log(
-      `[seedSwarms] Creating swarm "${swarmName.fullName}" with archetypes: ${swarmArchetypes.join(', ')}`
+      `[seedSwarms] Creating swarm "${swarmName.fullName}" with archetypes: ${swarmConfig.archetypes.join(', ')}`
     );
 
     // Create swarm in database
     await prisma.swarm.create({
       data: {
-        id: swarmId,
+        id: swarmConfig.swarmId,
         name: swarmName.fullName,
         description: `A collaborative swarm of ${AGENTS_PER_SWARM} agents`,
         balance: 1000, // Starting balance
@@ -1941,27 +2079,22 @@ async function seedSwarms() {
       },
     });
 
-    // Note: SwarmConfig would be created here if needed for SwarmAgent
-
     // Create individual agent records in database for tracking
     for (let j = 0; j < AGENTS_PER_SWARM; j++) {
-      const agentId = `${swarmId}_agent_${j}`;
-      const agentNames = await nameGenerator.generateNames([
-        { archetype: swarmArchetypes[j], temperature: 0.7, tools: [] },
-      ]);
-      const agentName = agentNames[0];
+      const agentId = `${swarmConfig.swarmId}_agent_${j}`;
+      const agentArchetype = swarmConfig.archetypes[j];
 
       await prisma.agentState.create({
         data: {
           id: agentId,
-          name: agentName.fullName,
-          archetype: swarmArchetypes[j],
+          name: `Agent ${j + 1}`, // Simple numeric name since agents don't need fancy names
+          archetype: agentArchetype,
           balance: 0, // Swarm manages balance
           reputation: 0.5,
           attempts: 0,
           wins: 0,
           meanTtcSec: 0,
-          swarmId: swarmId, // Link to swarm
+          swarmId: swarmConfig.swarmId, // Link to swarm
         },
       });
     }
@@ -2031,239 +2164,55 @@ async function gradeWithLLM(jobPrompt: string, artifact: string) {
 
 const agentWorkers: any[] = [];
 async function startAgentWorkers() {
-  log('[workers] Starting agent workers...');
+  log('[workers] Starting swarm workers...');
 
   try {
-    const USE_SWARMS = cfg.USE_SWARMS;
+    // Use swarm-based workers only
+    const swarms = await prisma.swarm.findMany({ where: { alive: true } });
+    log(`[workers] Found ${swarms.length} alive swarms`);
 
-    if (USE_SWARMS) {
-      // Use swarm-based workers
-      const swarms = await prisma.swarm.findMany({ where: { alive: true } });
-      log(`[workers] Found ${swarms.length} alive swarms`);
-
-      for (let i = 0; i < swarms.length; i++) {
-        const swarm = swarms[i];
-
-        // Add delay between worker creation to prevent server overload
-        if (i > 0) {
-          await new Promise((resolve) => setTimeout(resolve, 100)); // 100ms delay
-        }
-
-        // Get agents for this swarm to determine archetypes
-        const swarmAgents = await prisma.agentState.findMany({
-          where: { swarmId: swarm.id, alive: true },
-        });
-
-        const swarmArchetypes = swarmAgents.map((a: any) => a.archetype);
-
-        // Create swarm config
-        const swarmConfig: SwarmConfig = {
-          id: swarm.id,
-          name: swarm.name,
-          description: swarm.description || undefined,
-          agentTypes: swarmArchetypes as any[],
-          agentCount: swarmAgents.length,
-        };
-
-        const worker = new Worker(
-          'jobs',
-          async (job: any) => {
-            const started = Date.now();
-
-            // Check if system is paused
-            if (systemState.status !== 'running') {
-              log(`[Worker] Skipping job ${job.data.dbJobId} - system is paused`);
-              throw new Error('System is paused');
-            }
-
-            // Create SwarmAgent to handle the job
-            const swarmAgent = createSwarmAgent(swarmConfig);
-            log(`[Worker] Swarm ${swarm.id} processing job ${job.data.dbJobId}`);
-
-            try {
-              const result = await swarmAgent.invoke({
-                category: job.data.category || 'general',
-                payload: job.data.payload,
-                payout: job.data.payout,
-                deadlineS: job.data.deadlineS,
-              });
-
-              // First check if the swarm execution succeeded
-              const agentSucceeded = true; // SwarmAgent throws on failure
-
-              // Only grade the artifact if the swarm actually succeeded
-              let gradeResult: { passed: boolean; qualityScore?: number } = { passed: false };
-              let gradingFailed = false;
-
-              if (agentSucceeded) {
-                try {
-                  // Extract job prompt for grading context
-                  const jobPrompt =
-                    typeof job.data.payload === 'string'
-                      ? job.data.payload
-                      : job.data.payload.prompt || JSON.stringify(job.data.payload);
-
-                  gradeResult = await gradeWithLLM(jobPrompt, result);
-                } catch (error) {
-                  logError(`[workers] Grading failed for job ${job.data.dbJobId}:`, error);
-                  gradingFailed = true;
-                }
-              }
-
-              // The job is successful only if swarm execution succeeded, grading succeeded, and grade passed
-              const jobSucceeded = agentSucceeded && !gradingFailed && gradeResult.passed;
-
-              const delta = jobSucceeded ? job.data.payout : -FAIL_PENALTY;
-              await prisma.ledger.create({
-                data: {
-                  swarmId: swarm.id, // Use swarmId instead of agentId
-                  jobId: job.data.dbJobId,
-                  delta,
-                  reason: jobSucceeded ? 'payout' : 'fail',
-                  qualityGrade: gradeResult.qualityScore || null,
-                },
-              });
-
-              const ttc = Math.floor((Date.now() - started) / 1000);
-              await prisma.swarm.update({
-                where: { id: swarm.id },
-                data: {
-                  balance: { increment: delta },
-                  attempts: { increment: 1 },
-                  wins: { increment: jobSucceeded ? 1 : 0 },
-                  meanTtcSec: Math.floor(
-                    (swarm.meanTtcSec * swarm.attempts + ttc) / (swarm.attempts + 1)
-                  ),
-                },
-              });
-
-              // Clean up excessive whitespace to prevent storage issues
-              let artifact = result;
-              if (typeof result === 'string') {
-                const originalLength = result.length;
-
-                // First handle excessive spaces within lines
-                artifact = result.replace(/ {100,}/g, ' '); // Replace 100+ spaces with single space
-
-                // Then handle line-level whitespace
-                artifact = artifact
-                  .split('\n')
-                  .map((line) => line.trim()) // Trim whitespace from each line
-                  .filter((line) => line.length > 0 || artifact.includes('\n\n')) // Keep empty lines only if there are paragraph breaks
-                  .join('\n')
-                  .replace(/\n{3,}/g, '\n\n') // Replace 3+ newlines with just 2
-                  .trim(); // Remove leading/trailing whitespace
-
-                if (originalLength > 100000 && artifact.length < originalLength / 2) {
-                  log(
-                    `[Worker] Cleaned swarm result whitespace: ${originalLength} -> ${artifact.length} chars`
-                  );
-                }
-
-                // Only truncate if still too large after cleanup
-                if (artifact.length > 100000) {
-                  artifact = artifact.substring(0, 100000) + '\n... [truncated due to size]';
-                  log(
-                    `[Worker] Swarm result still too large after cleanup (${artifact.length} chars), truncating`
-                  );
-                }
-              }
-
-              return {
-                ok: jobSucceeded,
-                artifact,
-                toolsUsed: true, // Swarms use tools
-                newToolsCreated: false, // Track if needed
-                stepsUsed: 0, // Track if needed
-                selectedTool: null,
-                builderRationale: null,
-                executionArgs: null,
-                toolOutputSnippet: null,
-                summarySource: null,
-                totalToolsAvailable: null,
-              };
-            } catch (error) {
-              logError(`[Worker] Swarm ${swarm.id} failed on job ${job.data.dbJobId}:`, error);
-
-              // Record failure
-              const delta = -FAIL_PENALTY;
-              await prisma.ledger.create({
-                data: {
-                  swarmId: swarm.id,
-                  jobId: job.data.dbJobId,
-                  delta,
-                  reason: 'fail',
-                  qualityGrade: null,
-                },
-              });
-
-              const ttc = Math.floor((Date.now() - started) / 1000);
-              await prisma.swarm.update({
-                where: { id: swarm.id },
-                data: {
-                  balance: { increment: delta },
-                  attempts: { increment: 1 },
-                  meanTtcSec: Math.floor(
-                    (swarm.meanTtcSec * swarm.attempts + ttc) / (swarm.attempts + 1)
-                  ),
-                },
-              });
-
-              return {
-                ok: false,
-                artifact: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                toolsUsed: false,
-                newToolsCreated: false,
-                stepsUsed: 0,
-                selectedTool: null,
-                builderRationale: null,
-                executionArgs: null,
-                toolOutputSnippet: null,
-                summarySource: null,
-                totalToolsAvailable: null,
-              };
-            }
-          },
-          {
-            connection: redis,
-            concurrency: 1, // One job per swarm at a time for now
-          }
-        );
-
-        agentWorkers.push(worker);
-      }
-
-      log(`[workers] Started ${swarms.length} swarm workers`);
-      return;
-    }
-
-    // Original individual agent logic
-    const agents = await prisma.agentState.findMany({ where: { alive: true } });
-    const bps = await prisma.blueprint.findMany();
-    log(`[workers] Found ${agents.length} alive agents and ${bps.length} blueprints`);
-
-    const TEST_TOOL_BUILDER_ONLY = process.env.TEST_TOOL_BUILDER_ONLY === '1';
-    const filtered = TEST_TOOL_BUILDER_ONLY
-      ? agents.filter((s: any) => {
-          const bp = bps.find((b: any) => b.id === s.blueprintId);
-          return bp?.archetype === 'tool-builder';
-        })
-      : agents;
-    if (TEST_TOOL_BUILDER_ONLY) {
-      log(
-        `[workers] TEST_TOOL_BUILDER_ONLY=1 → filtering to ${filtered.length} tool-builder agents`
-      );
-    }
-
-    for (let i = 0; i < filtered.length; i++) {
-      const s = filtered[i];
+    for (let i = 0; i < swarms.length; i++) {
+      const swarm = swarms[i];
 
       // Add delay between worker creation to prevent server overload
       if (i > 0) {
         await new Promise((resolve) => setTimeout(resolve, 100)); // 100ms delay
       }
 
-      const bp = bps.find((b: any) => b.id === s.blueprintId)!;
+      // Get agents for this swarm to determine archetypes and create agent instances
+      const swarmAgents = await prisma.agentState.findMany({
+        where: { swarmId: swarm.id, alive: true },
+      });
+
+      const swarmArchetypes = swarmAgents.map((a: any) => a.archetype);
+
+      // Create actual agent instances for each database agent
+      const agentInstances: any[] = [];
+      for (const dbAgent of swarmAgents) {
+        let agentInstance;
+        if (dbAgent.archetype === 'tool-builder') {
+          agentInstance = new ToolBuilderAgent(dbAgent.id);
+        } else {
+          agentInstance = createAgentForBlueprint(dbAgent.id, dbAgent.archetype);
+        }
+
+        // Add metadata to match the agent instance with the database record
+        agentInstance.id = dbAgent.id;
+        agentInstance.name = dbAgent.name || `Agent ${dbAgent.id}`;
+        agentInstance.archetype = dbAgent.archetype;
+
+        agentInstances.push(agentInstance);
+      }
+
+      // Create swarm config with the loaded agent instances
+      const swarmConfig: SwarmConfig = {
+        id: swarm.id,
+        name: swarm.name,
+        description: swarm.description || undefined,
+        agentTypes: swarmArchetypes as any[],
+        agentCount: swarmAgents.length,
+        existingAgents: agentInstances,
+      };
 
       const worker = new Worker(
         'jobs',
@@ -2276,102 +2225,164 @@ async function startAgentWorkers() {
             throw new Error('System is paused');
           }
 
-          // Create simple React agent with archetype-based tools
-          const agent = createAgentForBlueprint(s.id, bp.archetype || 'llm-only');
-          log(
-            `[Worker] Using SimpleReactAgent with archetype ${bp.archetype || 'llm-only'} for agent ${s.id}`
-          );
+          // Create SwarmAgent to handle the job
+          const swarmAgent = createSwarmAgent(swarmConfig);
+          log(`[Worker] Swarm ${swarm.id} processing job ${job.data.dbJobId}`);
 
-          log(
-            `[Worker] Agent ${s.id} (archetype: ${bp.archetype || 'llm-only'}) processing general job ${job.data.dbJobId}`
-          );
-          const res: any = await agent.handle(job.data);
+          try {
+            const result = await swarmAgent.invoke({
+              category: job.data.category || 'general',
+              payload: job.data.payload,
+              payout: job.data.payout,
+              deadlineS: job.data.deadlineS,
+            });
 
-          const steps = res.stepsUsed || 0;
-          if (steps > 0) {
+            // First check if the swarm execution succeeded
+            const agentSucceeded = true; // SwarmAgent throws on failure
+
+            // Only grade the artifact if the swarm actually succeeded
+            let gradeResult: { passed: boolean; qualityScore?: number } = { passed: false };
+            let gradingFailed = false;
+
+            if (agentSucceeded) {
+              try {
+                // Extract job prompt for grading context
+                const jobPrompt =
+                  typeof job.data.payload === 'string'
+                    ? job.data.payload
+                    : job.data.payload.prompt || JSON.stringify(job.data.payload);
+
+                gradeResult = await gradeWithLLM(jobPrompt, result);
+              } catch (error) {
+                logError(`[workers] Grading failed for job ${job.data.dbJobId}:`, error);
+                gradingFailed = true;
+              }
+            }
+
+            // The job is successful only if swarm execution succeeded, grading succeeded, and grade passed
+            const jobSucceeded = agentSucceeded && !gradingFailed && gradeResult.passed;
+
+            const delta = jobSucceeded ? job.data.payout : -FAIL_PENALTY;
             await prisma.ledger.create({
               data: {
-                agentId: s.id,
+                swarmId: swarm.id, // Use swarmId instead of agentId
                 jobId: job.data.dbJobId,
-                delta: -steps,
-                reason: 'browser_steps',
+                delta,
+                reason: jobSucceeded ? 'payout' : 'fail',
+                qualityGrade: gradeResult.qualityScore || null,
               },
             });
-            await prisma.agentState.update({
-              where: { id: s.id },
-              data: { balance: { decrement: steps } },
+
+            const ttc = Math.floor((Date.now() - started) / 1000);
+            await prisma.swarm.update({
+              where: { id: swarm.id },
+              data: {
+                balance: { increment: delta },
+                attempts: { increment: 1 },
+                wins: { increment: jobSucceeded ? 1 : 0 },
+                meanTtcSec: Math.floor(
+                  (swarm.meanTtcSec * swarm.attempts + ttc) / (swarm.attempts + 1)
+                ),
+              },
             });
-          }
 
-          // First check if the agent execution succeeded
-          const agentSucceeded = res.ok;
+            // Clean up excessive whitespace to prevent storage issues
+            let artifact = result;
+            if (typeof result === 'string') {
+              const originalLength = result.length;
 
-          // Only grade the artifact if the agent actually succeeded
-          let gradeResult: { passed: boolean; qualityScore?: number } = { passed: false };
-          let gradingFailed = false;
+              // First handle excessive spaces within lines
+              artifact = result.replace(/ {100,}/g, ' '); // Replace 100+ spaces with single space
 
-          if (agentSucceeded) {
-            try {
-              // Extract job prompt for grading context
-              const jobPrompt =
-                typeof job.data.payload === 'string'
-                  ? job.data.payload
-                  : job.data.payload.prompt || JSON.stringify(job.data.payload);
+              // Then handle line-level whitespace
+              artifact = artifact
+                .split('\n')
+                .map((line) => line.trim()) // Trim whitespace from each line
+                .filter((line) => line.length > 0 || artifact.includes('\n\n')) // Keep empty lines only if there are paragraph breaks
+                .join('\n')
+                .replace(/\n{3,}/g, '\n\n') // Replace 3+ newlines with just 2
+                .trim(); // Remove leading/trailing whitespace
 
-              gradeResult = await gradeWithLLM(jobPrompt, res.artifact);
-            } catch (error) {
-              logError(`[workers] Grading failed for job ${job.data.dbJobId}:`, error);
-              gradingFailed = true;
+              if (originalLength > 100000 && artifact.length < originalLength / 2) {
+                log(
+                  `[Worker] Cleaned swarm result whitespace: ${originalLength} -> ${artifact.length} chars`
+                );
+              }
+
+              // Only truncate if still too large after cleanup
+              if (artifact.length > 100000) {
+                artifact = artifact.substring(0, 100000) + '\n... [truncated due to size]';
+                log(
+                  `[Worker] Swarm result still too large after cleanup (${artifact.length} chars), truncating`
+                );
+              }
             }
+
+            return {
+              ok: jobSucceeded,
+              artifact,
+              toolsUsed: true, // Swarms use tools
+              newToolsCreated: false, // Track if needed
+              stepsUsed: 0, // Track if needed
+              selectedTool: null,
+              builderRationale: null,
+              executionArgs: null,
+              toolOutputSnippet: null,
+              summarySource: null,
+              totalToolsAvailable: null,
+            };
+          } catch (error) {
+            logError(`[Worker] Swarm ${swarm.id} failed on job ${job.data.dbJobId}:`, error);
+
+            // Record failure
+            const delta = -FAIL_PENALTY;
+            await prisma.ledger.create({
+              data: {
+                swarmId: swarm.id,
+                jobId: job.data.dbJobId,
+                delta,
+                reason: 'fail',
+                qualityGrade: null,
+              },
+            });
+
+            const ttc = Math.floor((Date.now() - started) / 1000);
+            await prisma.swarm.update({
+              where: { id: swarm.id },
+              data: {
+                balance: { increment: delta },
+                attempts: { increment: 1 },
+                meanTtcSec: Math.floor(
+                  (swarm.meanTtcSec * swarm.attempts + ttc) / (swarm.attempts + 1)
+                ),
+              },
+            });
+
+            return {
+              ok: false,
+              artifact: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              toolsUsed: false,
+              newToolsCreated: false,
+              stepsUsed: 0,
+              selectedTool: null,
+              builderRationale: null,
+              executionArgs: null,
+              toolOutputSnippet: null,
+              summarySource: null,
+              totalToolsAvailable: null,
+            };
           }
-
-          // The job is successful only if agent execution succeeded, grading succeeded, and grade passed
-          const jobSucceeded = agentSucceeded && !gradingFailed && gradeResult.passed;
-
-          const delta = jobSucceeded ? job.data.payout : -FAIL_PENALTY;
-          await prisma.ledger.create({
-            data: {
-              agentId: s.id,
-              jobId: job.data.dbJobId,
-              delta,
-              reason: jobSucceeded ? 'payout' : 'fail',
-              qualityGrade: gradeResult.qualityScore || null, // Store score even for failures
-            },
-          });
-
-          const ttc = Math.floor((Date.now() - started) / 1000);
-          await prisma.agentState.update({
-            where: { id: s.id },
-            data: {
-              balance: { increment: delta },
-              attempts: { increment: 1 },
-              wins: { increment: jobSucceeded ? 1 : 0 },
-              meanTtcSec: Math.floor((s.meanTtcSec * s.attempts + ttc) / (s.attempts + 1)),
-            },
-          });
-
-          return {
-            ok: jobSucceeded,
-            artifact: res.artifact,
-            toolsUsed: res.toolsUsed ?? false,
-            newToolsCreated: res.newToolsCreated ?? false,
-            stepsUsed: res.stepsUsed ?? 0,
-            selectedTool: res.selectedTool ?? null,
-            builderRationale: res.builderRationale ?? null,
-            executionArgs: res.executionArgs ?? null,
-            toolOutputSnippet: res.toolOutputSnippet ?? null,
-            summarySource: res.summarySource ?? null,
-            totalToolsAvailable: res.totalToolsAvailable ?? null,
-          };
         },
         {
           connection: redis,
-          concurrency: 3,
+          concurrency: 1, // One job per swarm at a time for now
         }
       );
 
       agentWorkers.push(worker);
     }
+
+    log(`[workers] Started ${swarms.length} swarm workers`);
   } catch (error) {
     logError('[workers] Error in startAgentWorkers:', error);
     throw error; // Re-throw to be caught by startSystemProcesses
@@ -2524,6 +2535,10 @@ async function main() {
   fs.ensureDirSync(METRICS_DIR);
   fs.writeFileSync(path.join(METRICS_DIR, 'inequality.csv'), 'ts,gini,top5share\n');
   jobQueue = new Queue('jobs', { connection: redis });
+
+  // Preload models before seeding (name generation needs LLM)
+  await preloadOllamaModels();
+
   await seedIfEmpty();
 
   // Initialize system in paused state with some initial jobs for testing

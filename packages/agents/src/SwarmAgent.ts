@@ -6,6 +6,7 @@ import { PatchedChatVertexAI } from './patchedVertexAI';
 import { JobData, log, logError, getVertexTokenLimit } from '@soup/common';
 import { createAgentForBlueprint, AgentArchetype } from './SimpleReactAgent';
 import { ToolBuilderAgent } from './ToolBuilderAgent';
+import { LangChainToolBuilderAgent } from './LangChainToolBuilderAgent';
 
 export interface SwarmConfig {
   id: string;
@@ -13,6 +14,7 @@ export interface SwarmConfig {
   description?: string;
   agentTypes: AgentArchetype[];
   agentCount: number;
+  existingAgents?: any[]; // Pre-loaded agent instances from database
 }
 
 export interface SwarmMember {
@@ -71,28 +73,54 @@ export class SwarmAgent {
   }
 
   private initializeMembers(config: SwarmConfig): void {
-    const membersPerType = Math.ceil(config.agentCount / config.agentTypes.length);
+    // If existing agents are provided, use them directly
+    if (config.existingAgents && config.existingAgents.length > 0) {
+      log(`[SwarmAgent] Using ${config.existingAgents.length} existing database agents`);
 
-    config.agentTypes.forEach((archetype, _typeIndex) => {
-      for (let i = 0; i < membersPerType && this.members.length < config.agentCount; i++) {
-        const memberId = `${this.id}_${archetype}_${i}`;
-        const memberName = `${archetype.charAt(0).toUpperCase() + archetype.slice(1)} Agent ${i + 1}`;
-
-        let agent;
-        if (archetype === 'tool-builder') {
-          agent = new ToolBuilderAgent(memberId);
-        } else {
-          agent = createAgentForBlueprint(memberId, archetype);
-        }
-
+      config.existingAgents.forEach((agentInstance, index) => {
         this.members.push({
-          id: memberId,
-          name: memberName,
-          archetype,
-          agent,
+          id: agentInstance.id || `${this.id}_existing_${index}`,
+          name: agentInstance.name || `Agent ${index + 1}`,
+          archetype: agentInstance.archetype || 'llm-only',
+          agent: agentInstance,
         });
-      }
-    });
+      });
+    } else {
+      // Fallback to creating temporary agents (original behavior)
+      log(`[SwarmAgent] No existing agents provided, creating temporary agents`);
+      const membersPerType = Math.ceil(config.agentCount / config.agentTypes.length);
+
+      config.agentTypes.forEach((archetype, _typeIndex) => {
+        for (let i = 0; i < membersPerType && this.members.length < config.agentCount; i++) {
+          const memberId = `${this.id}_${archetype}_${i}`;
+          const memberName = `${archetype.charAt(0).toUpperCase() + archetype.slice(1)} Agent ${i + 1}`;
+
+          let agent;
+          if (archetype === 'tool-builder') {
+            // Choose between old and new ToolBuilderAgent implementations
+            const useLangChainToolBuilder =
+              (process.env.USE_LANGCHAIN_TOOL_BUILDER || 'true').toLowerCase() === 'true';
+
+            if (useLangChainToolBuilder) {
+              log(`[SwarmAgent] Creating LangChain-based ToolBuilderAgent for ${memberId}`);
+              agent = new LangChainToolBuilderAgent(memberId);
+            } else {
+              log(`[SwarmAgent] Creating custom ToolBuilderAgent for ${memberId}`);
+              agent = new ToolBuilderAgent(memberId);
+            }
+          } else {
+            agent = createAgentForBlueprint(memberId, archetype);
+          }
+
+          this.members.push({
+            id: memberId,
+            name: memberName,
+            archetype,
+            agent,
+          });
+        }
+      });
+    }
 
     log(`[SwarmAgent] Initialized swarm "${this.name}" with ${this.members.length} members`);
   }

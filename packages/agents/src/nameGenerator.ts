@@ -3,8 +3,8 @@
  * Format: [Name] the [Characteristic]
  */
 
-import { PatchedChatVertexAI } from './patchedVertexAI';
-import { log, logError, getVertexTokenLimit } from '@soup/common';
+import { createLLMProvider, LLMProvider } from './llm';
+import { log, logError } from '@soup/common';
 
 export interface AgentName {
   fullName: string;
@@ -13,28 +13,10 @@ export interface AgentName {
 }
 
 export class NameGenerator {
-  private llm: PatchedChatVertexAI;
+  private llm: LLMProvider;
 
   constructor() {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-    if (!projectId) {
-      throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
-    }
-
-    const maxOutputTokens = getVertexTokenLimit('name_generator');
-
-    this.llm = new PatchedChatVertexAI({
-      model: process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash',
-      temperature: 0.8, // Higher temperature for more creative names
-      maxOutputTokens, // Use config-based limit (undefined = no limit)
-      authOptions: {
-        credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
-          ? undefined
-          : process.env.GOOGLE_CLOUD_CREDENTIALS
-            ? JSON.parse(Buffer.from(process.env.GOOGLE_CLOUD_CREDENTIALS, 'base64').toString())
-            : undefined,
-      },
-    });
+    this.llm = createLLMProvider('name_generator');
   }
 
   /**

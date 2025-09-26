@@ -18,6 +18,10 @@ export type { GradeResult } from './llmGrader';
 export { NameGenerator } from './nameGenerator';
 export type { AgentName } from './nameGenerator';
 
+// Model preloading
+export { ModelPreloader, preloadModels } from './llm/modelPreloader';
+export type { PreloadOptions, PreloadResult } from './llm/modelPreloader';
+
 // Tool Builder Agent
 export { ToolBuilderAgent } from './ToolBuilderAgent';
 export { codeGeneratorTool } from './tools/codeGenerator';

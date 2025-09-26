@@ -1,10 +1,10 @@
 /**
  * LLM-based Grader for evaluating agent response quality
- * Uses same Vertex AI interface as job generation
+ * Uses LLM provider system for multi-provider support
  */
 
-import { PatchedChatVertexAI } from './patchedVertexAI';
-import { log, logError, getVertexTokenLimit } from '@soup/common';
+import { createLLMProvider, LLMProvider } from './llm';
+import { log, logError } from '@soup/common';
 
 export interface GradeResult {
   passed: boolean;
@@ -13,29 +13,10 @@ export interface GradeResult {
 }
 
 export class LLMGrader {
-  private llm: PatchedChatVertexAI;
+  private llm: LLMProvider;
 
   constructor() {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-
-    if (!projectId) {
-      throw new Error('GOOGLE_CLOUD_PROJECT environment variable is required');
-    }
-
-    const maxOutputTokens = getVertexTokenLimit('llm_grader');
-
-    this.llm = new PatchedChatVertexAI({
-      model: process.env.VERTEX_AI_MODEL || 'gemini-1.5-flash',
-      temperature: 0.1, // Low temperature for consistent grading
-      maxOutputTokens, // Use config-based limit (undefined = no limit)
-      authOptions: {
-        credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS
-          ? undefined
-          : process.env.GOOGLE_CLOUD_CREDENTIALS
-            ? JSON.parse(Buffer.from(process.env.GOOGLE_CLOUD_CREDENTIALS, 'base64').toString())
-            : undefined,
-      },
-    });
+    this.llm = createLLMProvider('result_grader');
   }
 
   async gradeResponse(jobPrompt: string, agentResponse: string): Promise<GradeResult> {

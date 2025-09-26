@@ -15,6 +15,7 @@ import {
   toStringContent,
 } from './toolBuilder/utils';
 import { AvailableToolSummary } from './types';
+import { ToolMemoryService, AgentMemoryService } from './memory';
 
 export class ToolBuilderAgent {
   private availableTools: AvailableToolSummary[] = [];
@@ -22,12 +23,19 @@ export class ToolBuilderAgent {
   public id: string;
   public archetype = 'tool-builder';
   private strictModeEnabled: boolean;
+  private toolMemory: ToolMemoryService;
+  private agentMemory: AgentMemoryService;
 
   constructor(id: string) {
     this.id = id;
     const strictEnv = (process.env.TOOL_BUILDER_STRICT_MODE || 'true').toLowerCase();
     this.strictModeEnabled = !(strictEnv === '0' || strictEnv === 'false' || strictEnv === 'off');
-    log(`[ToolBuilderAgent] Constructor called for agent ${id}`);
+
+    // Initialize memory services
+    this.toolMemory = ToolMemoryService.getInstance();
+    this.agentMemory = AgentMemoryService.getInstance();
+
+    log(`[ToolBuilderAgent] Constructor called for agent ${id} with memory enabled`);
     this.initializationPromise = this.initializeAgent();
   }
 
@@ -57,6 +65,51 @@ export class ToolBuilderAgent {
     }
   }
 
+  /**
+   * Check memory for existing tools that could handle this job before creating new ones
+   */
+  private async checkMemoryForSuitableTools(
+    jobPrompt: string,
+    jobCategory: string
+  ): Promise<string | null> {
+    try {
+      // First, try to find tools by category
+      const categoryTools = await this.toolMemory.findTools(this.id, {
+        category: jobCategory,
+        minSuccessCount: 1,
+        minQuality: 0.3,
+        limit: 3,
+      });
+
+      if (categoryTools.length > 0) {
+        log(
+          `[ToolBuilderAgent] Found ${categoryTools.length} existing tools for category ${jobCategory}`
+        );
+        // Return the best performing tool
+        return categoryTools[0].toolName;
+      }
+
+      // If no category match, try similarity search
+      const similarTools = await this.toolMemory.findSimilarTools(this.id, jobPrompt, 3);
+
+      if (similarTools.length > 0) {
+        // Only use tools that have proven success
+        const provenTools = similarTools.filter(
+          (tool) => tool.successCount > 0 && tool.avgQuality > 0.3
+        );
+        if (provenTools.length > 0) {
+          log(`[ToolBuilderAgent] Found ${provenTools.length} similar tools with proven success`);
+          return provenTools[0].toolName;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      logError(`[ToolBuilderAgent] Failed to check memory for suitable tools:`, error);
+      return null;
+    }
+  }
+
   async handle(job: JobData & { dbJobId?: string }): Promise<any> {
     await this.initializationPromise;
 
@@ -67,6 +120,12 @@ export class ToolBuilderAgent {
     const jobId = (job as any).dbJobId || 'unknown';
 
     try {
+      // First, check memory for existing tools before going through the planning process
+      const memoryTool = await this.checkMemoryForSuitableTools(
+        jobPrompt,
+        job.category || 'general'
+      );
+
       const registryStats = dynamicToolLoader.getRegistryStats();
       const plan = await builderPlan(
         {
@@ -80,6 +139,12 @@ export class ToolBuilderAgent {
 
       let newToolsCreated = false;
       let toolUsed = plan.reuseTool?.trim() || '';
+
+      // Prefer memory tool over plan suggestion if memory found a proven tool
+      if (memoryTool && !toolUsed) {
+        toolUsed = memoryTool;
+        log(`[ToolBuilderAgent] Using tool from memory: ${memoryTool}`);
+      }
 
       if (plan.createTool) {
         const normalized = normalizeCodeGeneratorRequest({
@@ -103,6 +168,21 @@ export class ToolBuilderAgent {
         toolUsed = parsed.toolName;
         newToolsCreated = true;
         await this.reloadTools();
+
+        // Store the newly created tool in memory
+        try {
+          await this.toolMemory.saveTool(
+            this.id,
+            toolUsed,
+            'Generated tool code', // We'll get the actual code later when the tool manifest system is available
+            normalized.taskDescription || 'Generated tool',
+            job.category || 'general'
+          );
+          log(`[ToolBuilderAgent] Saved new tool "${toolUsed}" to memory`);
+        } catch (memoryError) {
+          logError(`[ToolBuilderAgent] Failed to save tool to memory:`, memoryError);
+          // Continue execution even if memory storage fails
+        }
       }
 
       const loadedTool = await dynamicToolLoader.ensureTool(toolUsed);
@@ -192,6 +272,39 @@ export class ToolBuilderAgent {
       );
 
       const stepsUsed = 2 + (newToolsCreated ? 1 : 0);
+
+      // Update tool performance in memory after execution
+      try {
+        // Calculate quality score based on success and response length (simple heuristic)
+        const qualityScore = runnerResult.ok
+          ? Math.min(90, Math.max(30, runnerResult.toolOutput?.length > 50 ? 70 : 40))
+          : 20;
+
+        await this.toolMemory.updateToolPerformance(
+          this.id,
+          toolUsed,
+          runnerResult.ok,
+          qualityScore
+        );
+
+        // Store experience in general memory
+        const outcome = runnerResult.ok ? 'success' : 'failure';
+        await this.agentMemory.storeExperience(
+          this.id,
+          job.category || 'general',
+          outcome,
+          `Used tool "${toolUsed}" for task: ${jobPrompt.slice(0, 100)}`,
+          `Tool execution with args: ${JSON.stringify(sanitizedArgs).slice(0, 100)}`,
+          qualityScore
+        );
+
+        log(
+          `[ToolBuilderAgent] Updated memory for tool "${toolUsed}": ${outcome}, quality=${qualityScore}`
+        );
+      } catch (memoryError) {
+        logError(`[ToolBuilderAgent] Failed to update memory:`, memoryError);
+        // Continue execution even if memory storage fails
+      }
 
       return {
         ok: runnerResult.ok,
