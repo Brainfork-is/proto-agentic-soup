@@ -2028,8 +2028,15 @@ async function seedSwarms() {
   const SWARM_COUNT = cfg.SWARM_COUNT;
   const AGENTS_PER_SWARM = cfg.AGENTS_PER_SWARM;
 
-  // Available agent archetypes for swarms
-  const agentArchetypes = ['llm-only', 'web-browser', 'wikipedia', 'google-trends', 'tool-builder'];
+  // Fixed swarm composition: 2 tool-builder agents + 1 of each other archetype
+  const fixedSwarmArchetypes = [
+    'tool-builder',
+    'tool-builder',
+    'llm-only',
+    'web-browser',
+    'wikipedia',
+    'google-trends',
+  ];
 
   // Pre-generate all swarm configurations
   const swarmConfigs = [];
@@ -2037,16 +2044,9 @@ async function seedSwarms() {
   for (let i = 0; i < SWARM_COUNT; i++) {
     const swarmId = `swarm_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
 
-    // Create random selection of agent types for this swarm
-    const swarmArchetypes = [];
-    for (let j = 0; j < AGENTS_PER_SWARM; j++) {
-      const randomArchetype = agentArchetypes[Math.floor(Math.random() * agentArchetypes.length)];
-      swarmArchetypes.push(randomArchetype);
-    }
-
     swarmConfigs.push({
       swarmId,
-      archetypes: swarmArchetypes,
+      archetypes: fixedSwarmArchetypes,
     });
   }
 
@@ -2073,7 +2073,7 @@ async function seedSwarms() {
       data: {
         id: swarmConfig.swarmId,
         name: swarmName.fullName,
-        description: `A collaborative swarm of ${AGENTS_PER_SWARM} agents`,
+        description: `A collaborative swarm with 2 tool-builders and 1 of each archetype (llm-only, web-browser, wikipedia, google-trends)`,
         balance: 1000, // Starting balance
         reputation: 0.5, // Starting reputation
       },
