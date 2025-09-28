@@ -76,26 +76,6 @@ const commonSchema = z.object({
   LOCAL_LLM_MAX_TOKENS_PER_AGENT: z.coerce.number().optional().default(2000),
 });
 
-const browserSchema = z.object({
-  BROWSER_GATEWAY_PORT: z.coerce.number().optional().default(3100),
-  ALLOWED_HOSTS: z
-    .string()
-    .optional()
-    .default('localhost,127.0.0.1,*.local,*.example.com,httpbin.org,jsonplaceholder.typicode.com')
-    .transform((s) =>
-      s
-        .split(',')
-        .map((x) => x.trim())
-        .filter(Boolean)
-    ),
-  MCP_KNOWLEDGE_SERVER: z.string().optional().default(''),
-  MCP_BEARER_TOKEN: z.string().optional().default(''),
-});
-
-const siteSchema = z.object({
-  SITE_KB_PORT: z.coerce.number().optional().default(3200),
-});
-
 const runnerSchema = z.object({
   SOUP_RUNNER_PORT: z.coerce.number().optional().default(3000),
   REDIS_URL: z.string().optional().default('redis://localhost:6379'),
@@ -127,24 +107,10 @@ const runnerSchema = z.object({
 });
 
 export type CommonConfig = z.infer<typeof commonSchema>;
-export type BrowserConfig = z.infer<typeof browserSchema> & CommonConfig;
-export type SiteConfig = z.infer<typeof siteSchema> & CommonConfig;
 export type RunnerConfig = z.infer<typeof runnerSchema> & CommonConfig;
 
 function readEnvObject<T extends z.ZodTypeAny>(schema: T) {
   return schema.parse(process.env) as z.infer<T>;
-}
-
-export function loadBrowserConfig(): BrowserConfig {
-  const common = readEnvObject(commonSchema);
-  const app = readEnvObject(browserSchema);
-  return { ...common, ...app };
-}
-
-export function loadSiteConfig(): SiteConfig {
-  const common = readEnvObject(commonSchema);
-  const app = readEnvObject(siteSchema);
-  return { ...common, ...app };
 }
 
 export function loadRunnerConfig(): RunnerConfig {

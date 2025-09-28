@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Agentic Soup is an experimental TypeScript/Node.js system that simulates "survival of the fittest" dynamics among LangGraph.js software agents competing for LLM-generated jobs. It uses a microservices architecture with three main services (soup-runner, browser-gateway, site-kb) backed by Redis and SQLite, with Google Vertex AI providing the intelligence layer.
+Agentic Soup is an experimental TypeScript/Node.js system that simulates "survival of the fittest" dynamics among LangChain software agents competing for LLM-generated jobs. Agents use external tools like Wikipedia, SerpAPI, and web browsing to complete tasks. The system is backed by Redis and SQLite, with Google Vertex AI providing the intelligence layer.
 
 ## Development Commands
 
@@ -30,16 +30,11 @@ pnpm i                    # Install all dependencies
 pnpm --filter @soup/soup-runner prisma:generate  # Generate Prisma client
 pnpm --filter @soup/soup-runner prisma:migrate   # Run migrations
 
-# Development mode (starts all services)
-pnpm dev                  # Runs all three services concurrently
+# Development mode
+pnpm dev                  # Runs soup-runner (main orchestrator on port 3000)
 
 # Debug logs are written to console and files
 # System automatically creates debug output for monitoring
-
-# Individual services
-pnpm --filter @soup/soup-runner dev        # Main orchestrator (port 3000)
-pnpm --filter @soup/browser-gateway dev    # Browser API (port 3100)
-pnpm --filter @soup/site-kb dev            # Knowledge base (port 3200)
 ```
 
 ### Code Quality
@@ -76,28 +71,29 @@ pnpm reset               # Creates timestamped backup then resets everything
 ### Service Architecture
 
 ```
-soup-runner (3000) ←→ browser-gateway (3100) ←→ site-kb (3200)
+soup-runner (3000)
         ↓
     Redis (6379)
     SQLite (Prisma)
+        ↓
+External APIs (SerpAPI, Wikipedia, LangChain WebBrowser)
 ```
 
 ### Key Directories
 
 - `/apps/soup-runner/`: Main orchestrator - job generation, agent workers, economics
-- `/apps/browser-gateway/`: Playwright-based browser automation API
-- `/apps/site-kb/`: Static website serving as local "internet" for agents
 - `/packages/common/`: Shared types, utilities, and configuration
-- `/packages/agents/`: Agent implementations and tool adapters
+- `/packages/agents/`: Agent implementations using LangChain tools
 
 ### Technology Stack
 
 - **Runtime**: Node.js 20.x (strict requirement)
 - **Language**: TypeScript with CommonJS modules
-- **Framework**: Fastify (all services)
+- **Framework**: Fastify
 - **Database**: SQLite with Prisma ORM
 - **Queue**: Redis with BullMQ
-- **Browser**: Playwright
+- **Agent Tools**: LangChain (Wikipedia, SerpAPI, WebBrowser)
+- **LLM**: Google Vertex AI (Gemini models)
 - **Config**: Zod-validated environment variables
 
 ## Key Patterns
@@ -224,10 +220,7 @@ pnpm prisma:generate
 
 # Test build passes
 pnpm --filter @soup/common build
-pnpm --filter @soup/agents build  
-pnpm --filter @soup/browser-gateway build
-pnpm --filter @soup/site-kb build
-pnpm --filter @soup/build-agent build
+pnpm --filter @soup/agents build
 pnpm --filter @soup/soup-runner build
 ```
 

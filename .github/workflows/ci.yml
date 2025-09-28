@@ -62,9 +62,6 @@ jobs:
 
       - name: Build apps
         run: |
-          pnpm --filter @soup/browser-gateway build
-          pnpm --filter @soup/site-kb build  
-          pnpm --filter @soup/build-agent build
           pnpm --filter @soup/soup-runner build
 
       - name: Verify Redis health
@@ -73,29 +70,3 @@ jobs:
           for i in {1..20}; do
             if redis-cli -h 127.0.0.1 -p 6379 ping | grep -q PONG; then
               echo "Redis healthy"; exit 0; fi; echo "waiting for redis..."; sleep 1; done; exit 1
-
-      - name: Install Playwright browsers
-        run: pnpm --filter @soup/browser-gateway exec playwright install --with-deps chromium
-
-      - name: Run tests
-        run: |
-          # Start services in background for integration tests using dev mode
-          BROWSER_GATEWAY_PORT=3101 pnpm --filter @soup/browser-gateway dev &
-          BROWSER_GATEWAY_PID=$!
-          pnpm --filter @soup/site-kb dev &
-          SITE_KB_PID=$!
-          
-          # Wait for services to start
-          echo "Waiting for services to start..."
-          sleep 15
-          
-          # Check if services are ready
-          timeout 60 bash -c 'until curl -f http://localhost:3101/healthz; do echo "Waiting for browser-gateway..."; sleep 3; done'
-          timeout 60 bash -c 'until curl -f http://localhost:3200/healthz; do echo "Waiting for site-kb..."; sleep 3; done'
-          
-          # Run tests
-          pnpm --filter @soup/browser-gateway test
-          
-          # Clean up background processes
-          kill $BROWSER_GATEWAY_PID $SITE_KB_PID || true
-          sleep 2

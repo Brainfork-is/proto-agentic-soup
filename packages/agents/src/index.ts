@@ -35,7 +35,4 @@ export type { SwarmConfig, SwarmMember } from './SwarmAgent';
 // Core utilities (kept for compatibility)
 export { memoryManager } from './agentMemory';
 
-// Legacy exports (deprecated)
-export { LangGraphAgent } from './langgraph/LangGraphAgent';
-
 export { PatchedChatVertexAI } from './patchedVertexAI';
