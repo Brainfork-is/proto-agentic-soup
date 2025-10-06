@@ -10,6 +10,7 @@ BACKUP_DIR="backups/reset-$(date +%Y%m%d-%H%M%S)"
 TOOLS_DIR="packages/agents/src/generated-tools"
 DIST_TOOLS_DIR="packages/agents/dist/src/generated-tools"
 DB_FILE="apps/soup-runner/src/prisma/dev.db"
+LOG_FILE="soup-runner.log"
 REDIS_HOST="${REDIS_HOST:-localhost}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 REDIS_DB="${REDIS_DB:-0}"
@@ -19,9 +20,10 @@ echo "============================="
 echo "This will:"
 echo "1. Export current job data to CSV"
 echo "2. Backup generated tools"
-echo "3. Clear the SQLite database"  
-echo "4. Clear the Redis job queue"
-echo "5. Create timestamped backup in: $BACKUP_DIR"
+echo "3. Backup system logs"
+echo "4. Clear the SQLite database"
+echo "5. Clear the Redis job queue"
+echo "6. Create timestamped backup in: $BACKUP_DIR"
 echo
 
 # Confirm action
@@ -75,7 +77,16 @@ else
     echo "⚠️  Generated tools dist directory not found, skipping dist backup"
 fi
 
-# Step 4: Backup database (before clearing)
+# Step 4: Backup system logs
+echo "📝 Backing up system logs..."
+if [ -f "$LOG_FILE" ]; then
+    cp "$LOG_FILE" "$BACKUP_DIR/soup-runner.log"
+    echo "✅ System log backed up to $BACKUP_DIR/soup-runner.log"
+else
+    echo "⚠️  Log file not found, skipping log backup"
+fi
+
+# Step 5: Backup database (before clearing)
 echo "💾 Backing up database..."
 if [ -f "$DB_FILE" ]; then
     cp "$DB_FILE" "$BACKUP_DIR/database-backup.db"
@@ -84,7 +95,7 @@ else
     echo "⚠️  Database file not found, skipping database backup"
 fi
 
-# Step 5: Clear the database 
+# Step 6: Clear the database 
 echo "🗑️  Clearing SQLite database..."
 if [ -f "$DB_FILE" ]; then
     cd apps/soup-runner
@@ -113,7 +124,7 @@ else
     echo "⚠️  Database file not found, skipping database clear"
 fi
 
-# Step 6: Clear Redis job queue
+# Step 7: Clear Redis job queue
 echo "🔴 Clearing Redis job queue..."
 if command -v redis-cli &> /dev/null; then
     redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" -n "$REDIS_DB" FLUSHDB > /dev/null 2>&1
@@ -126,7 +137,7 @@ else
     echo "⚠️  redis-cli not found, skipping queue clear"
 fi
 
-# Step 7: Clear generated tools
+# Step 8: Clear generated tools
 echo "🛠️  Clearing generated tools..."
 
 rm -rf "$TOOLS_DIR" "$DIST_TOOLS_DIR"
@@ -135,7 +146,7 @@ mkdir -p "$DIST_TOOLS_DIR/code" "$DIST_TOOLS_DIR/manifests"
 
 echo "✅ Generated tools directories (src & dist) cleared and recreated"
 
-# Step 8: Create backup summary
+# Step 9: Create backup summary
 echo "📋 Creating backup summary..."
 cat > "$BACKUP_DIR/README.md" << EOF
 # Agentic Soup System Reset Backup
@@ -147,6 +158,7 @@ cat > "$BACKUP_DIR/README.md" << EOF
 
 - \`jobs-export.csv\` - All job data with results and metrics
 - \`database-backup.db\` - Complete SQLite database backup
+- \`soup-runner.log\` - Complete system logs from this run
 - \`generated-tools/\` - All custom tools created by agents
   - \`generated-tools/code/\` - Tool JavaScript files
   - \`generated-tools/manifests/\` - Tool metadata and usage stats

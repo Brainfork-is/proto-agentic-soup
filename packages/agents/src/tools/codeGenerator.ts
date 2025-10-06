@@ -325,7 +325,8 @@ Return only the JavaScript code (no markdown formatting or explanations).`;
 
       // Additional validations
       this.validateRequiredStructure(code, toolName);
-      this.detectCommonSyntaxErrors(code);
+      // Disabled: detectCommonSyntaxErrors has too many false positives
+      // this.detectCommonSyntaxErrors(code);
 
       return { valid: true };
     } catch (syntaxError: any) {

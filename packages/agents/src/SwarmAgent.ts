@@ -176,8 +176,26 @@ export class SwarmAgent {
         selectedAgents.map((agent) => this.invokeAgent(agent, job))
       );
 
-      // Combine and synthesize results
-      const synthesizedResult = await this.synthesizeResults(results, job);
+      // Filter out error responses - only keep successful results
+      const successfulResults = results.filter(
+        (r) =>
+          (!r.includes('encountered an error') && !r.includes('Agent')) || !r.includes('failed')
+      );
+
+      if (successfulResults.length === 0) {
+        // All agents failed
+        const errorMessages = results.filter((r) => r.includes('encountered an error'));
+        throw new Error(
+          `All ${results.length} agents failed to process job. Errors: ${errorMessages.join('; ')}`
+        );
+      }
+
+      log(
+        `[SwarmAgent] ${successfulResults.length}/${results.length} agents succeeded, synthesizing results`
+      );
+
+      // Combine and synthesize only successful results
+      const synthesizedResult = await this.synthesizeResults(successfulResults, job);
 
       log(`[SwarmAgent] Swarm "${this.name}" completed job`);
       return synthesizedResult;
@@ -235,34 +253,62 @@ export class SwarmAgent {
 
   private async invokeAgent(member: SwarmMember, job: JobData): Promise<string> {
     try {
-      if (member.archetype === 'tool-builder') {
-        // Tool builder agent uses handle method
-        return await member.agent.handle(job);
-      } else {
-        // SimpleReactAgent uses handle method
-        return await member.agent.handle(job);
+      const result = await member.agent.handle(job);
+
+      // Handle both object responses and string responses
+      if (typeof result === 'string') {
+        return result;
+      } else if (result && typeof result === 'object') {
+        // Extract artifact from object response
+        return result.artifact || result.response || JSON.stringify(result);
       }
+
+      return 'No response generated';
     } catch (error) {
       logError(`[SwarmAgent] Agent "${member.archetype}" failed:`, error);
       return `Agent "${member.archetype}" encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
   }
 
-  private async synthesizeResults(results: string[], job: JobData): Promise<string> {
-    // If only one result, return it
-    if (results.length === 1) {
-      return results[0];
+  private async synthesizeResults(allResults: string[], job: JobData): Promise<string> {
+    // Filter out error responses - use successful ones only
+    const successfulResults = allResults.filter(
+      (r) =>
+        !r.includes('encountered an error') &&
+        !r.includes('failed to') &&
+        !r.toLowerCase().includes('error:') &&
+        r !== 'No response generated'
+    );
+
+    // If all results are errors, throw error
+    if (successfulResults.length === 0) {
+      logError(`[SwarmAgent] All agent responses failed`);
+      throw new Error(`All agents failed to complete the task`);
+    }
+
+    // Log if some agents failed but we can still proceed
+    if (successfulResults.length < allResults.length) {
+      log(
+        `[SwarmAgent] ${allResults.length - successfulResults.length}/${allResults.length} agents failed, using ${successfulResults.length} successful results`
+      );
+    }
+
+    // If only one successful result, return it
+    if (successfulResults.length === 1) {
+      return successfulResults[0];
     }
 
     // Use LLM to synthesize multiple results
-    const prompt = `Synthesize the following responses from different specialist agents into a comprehensive, coherent answer:
+    const prompt = `Synthesize the following responses from different specialist agents into a comprehensive, coherent answer.
+
+IMPORTANT: All responses below are from successful agent executions. Combine them into a single, cohesive answer that addresses the task completely.
 
 Task: ${JSON.stringify(job.payload)}
 
-Agent Responses:
-${results.map((result, index) => `Agent ${index + 1}: ${result}`).join('\n\n')}
+Successful Agent Responses:
+${successfulResults.map((result, index) => `Agent ${index + 1}: ${result}`).join('\n\n')}
 
-Please provide a unified, well-structured response that combines the best insights from all agents:`;
+Provide a unified, well-structured response that combines the best insights from all agents. Focus on delivering a complete, actionable answer to the task:`;
 
     try {
       const response = await this.llm.invoke(prompt);
@@ -302,8 +348,10 @@ Please provide a unified, well-structured response that combines the best insigh
       return content;
     } catch (error) {
       logError('[SwarmAgent] Failed to synthesize results:', error);
-      // Fallback: return the first valid result (also cleaned)
-      let fallback = results.find((r) => r && r.trim().length > 0) || 'No valid response generated';
+      // Fallback: return the first valid successful result (also cleaned)
+      let fallback =
+        successfulResults.find((r: string) => r && r.trim().length > 0) ||
+        'No valid response generated';
 
       // Clean up whitespace in fallback too
       if (fallback) {
@@ -315,8 +363,8 @@ Please provide a unified, well-structured response that combines the best insigh
         // Then handle line-level whitespace
         fallback = fallback
           .split('\n')
-          .map((line) => line.trim())
-          .filter((line) => line.length > 0 || fallback.includes('\n\n'))
+          .map((line: string) => line.trim())
+          .filter((line: string) => line.length > 0 || fallback.includes('\n\n'))
           .join('\n')
           .replace(/\n{3,}/g, '\n\n')
           .trim();

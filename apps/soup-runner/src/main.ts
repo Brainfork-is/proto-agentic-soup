@@ -57,9 +57,9 @@ let systemState: {
   startedAt: Date | null;
   pausedAt: Date | null;
 } = {
-  status: 'paused', // 'running', 'paused' - start paused to allow setup without processing
-  startedAt: null,
-  pausedAt: new Date(), // Set paused timestamp on startup
+  status: 'running', // Start in running state by default
+  startedAt: new Date(),
+  pausedAt: null,
 };
 
 // Workers and intervals to control
@@ -2080,14 +2080,21 @@ async function seedSwarms() {
     });
 
     // Create individual agent records in database for tracking
+    const toolBuilderCount = { count: 0 };
     for (let j = 0; j < AGENTS_PER_SWARM; j++) {
       const agentId = `${swarmConfig.swarmId}_agent_${j}`;
       const agentArchetype = swarmConfig.archetypes[j];
 
+      let agentName = `${swarmName.fullName} - ${agentArchetype}`;
+      if (agentArchetype === 'tool-builder') {
+        toolBuilderCount.count++;
+        agentName = `${swarmName.fullName} - tool-builder-${toolBuilderCount.count}`;
+      }
+
       await prisma.agentState.create({
         data: {
           id: agentId,
-          name: `Agent ${j + 1}`, // Simple numeric name since agents don't need fancy names
+          name: agentName,
           archetype: agentArchetype,
           balance: 0, // Swarm manages balance
           reputation: 0.5,
@@ -2541,18 +2548,23 @@ async function main() {
 
   await seedIfEmpty();
 
-  // Initialize system in paused state with some initial jobs for testing
-  log('[soup-runner] System starting in paused state...');
+  // Initialize system in running state
+  log('[soup-runner] System starting in running state...');
   log('[soup-runner] Generating initial job batch...');
 
-  // Generate initial jobs but don't start workers - wait for completion
+  // Generate initial jobs
   await generateJobs();
   log('[soup-runner] Initial job batch generated successfully');
+
+  // Start workers and job generation
+  log('[soup-runner] Starting agent workers and job generation...');
+  await startSystemProcesses();
+  log('[soup-runner] Workers started successfully');
 
   // Start HTTP server after initialization is complete
   await app.listen({ port: cfg.SOUP_RUNNER_PORT, host: '0.0.0.0' });
   log(`[soup-runner] ${cfg.SOUP_RUNNER_PORT}`);
-  log('[soup-runner] System ready in paused state. Use dashboard or API to start processing.');
+  log('[soup-runner] System ready and processing jobs.');
 }
 
 main().catch((e) => {

@@ -1,5 +1,6 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+  - 'packages/mcp-servers/*'
   - 'infra/*'
   - 'seeds'

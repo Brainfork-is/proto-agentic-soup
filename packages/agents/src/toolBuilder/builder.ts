@@ -99,7 +99,7 @@ export async function builderPlan(
     : 'Prefer to reuse or create a tool. If absolutely none fit, you may omit reuseTool/createTool but explain clearly why.';
 
   const formatInstructions =
-    'Return strict JSON with the shape {"rationale": string, "reuseTool"?: string, "createTool"?: {"taskDescription": string, "toolName": string, "expectedInputs"?: object, "expectedOutput": string}, "executionArgs"?: object}. ' +
+    'Return strict JSON with the shape {"rationale": string, "reuseTool"?: string, "createTool"?: {"taskDescription": string, "toolName": string, "expectedInputs"?: object, "expectedOutput": string}, "executionArgs": object}. ' +
     'All strings must use double quotes and objects must be valid JSON. No surrounding prose.';
 
   const userPrompt = [
@@ -119,9 +119,15 @@ export async function builderPlan(
     'Tools should use REAL DATA from the web or compute actual results.',
     'DO NOT create tools that return dummy, mock, or placeholder data.',
     '',
-    'Populate executionArgs with the exact JSON arguments required to invoke the chosen tool. ' +
-      'If you specify createTool, include taskDescription, toolName, expectedInputs, expectedOutput. ' +
-      'Return ONLY JSON.',
+    'CRITICAL: You MUST provide executionArgs - a non-empty JSON object with concrete arguments for the tool.',
+    'Example for reusing a tool:',
+    '{"rationale": "Using searchWeb to find information", "reuseTool": "searchWeb", "executionArgs": {"query": "latest AI news", "limit": 5}}',
+    '',
+    'Example for creating a new tool:',
+    '{"rationale": "Need a new tool", "createTool": {"toolName": "analyzeData", "taskDescription": "Analyze sales data", "expectedOutput": "JSON report"}, "executionArgs": {"dataSource": "sales_q3.csv", "metrics": ["revenue", "growth"]}}',
+    '',
+    'If you specify createTool, include taskDescription, toolName, expectedInputs, expectedOutput.',
+    'Return ONLY JSON with NO surrounding text.',
   ].join('\n');
 
   const baseMessages = [
@@ -186,9 +192,18 @@ export async function builderPlan(
           `[builderPlan] Validation failed (attempt ${attempt + 1}/${maxRetries}): ${validationError}`
         );
         lastValidationError = validationError;
+
+        let retryMessage = `Your previous reply was invalid: ${validationError}. `;
+        if (validationError.includes('executionArgs')) {
+          retryMessage +=
+            'You MUST include executionArgs as a non-empty JSON object with the actual arguments to pass to the tool. Example: {"executionArgs": {"query": "search term", "limit": 10}}';
+        } else {
+          retryMessage += 'Respond again with ONLY valid JSON matching the required schema.';
+        }
+
         messages.push({
           role: 'user' as const,
-          content: `Your previous reply was invalid: ${validationError}. Respond again with ONLY valid JSON matching the required schema.`,
+          content: retryMessage,
         });
         continue;
       }
@@ -216,7 +231,34 @@ export async function builderPlan(
     }
 
     if (!lastParsedPlan.executionArgs || typeof lastParsedPlan.executionArgs !== 'object') {
-      lastParsedPlan.executionArgs = {};
+      log('[builderPlan] executionArgs missing or invalid, attempting to infer from context');
+
+      if (lastParsedPlan.createTool) {
+        const createTool = lastParsedPlan.createTool as unknown as Record<string, unknown>;
+        const expectedInputs = createTool.expectedInputs;
+
+        if (expectedInputs && typeof expectedInputs === 'object') {
+          const inferredArgs: Record<string, unknown> = {};
+          const inputs = expectedInputs as Record<string, unknown>;
+
+          for (const key in inputs) {
+            inferredArgs[key] = '';
+          }
+
+          if (Object.keys(inferredArgs).length > 0) {
+            log(
+              `[builderPlan] Inferred executionArgs from expectedInputs: ${Object.keys(inferredArgs).join(', ')}`
+            );
+            lastParsedPlan.executionArgs = inferredArgs;
+          } else {
+            lastParsedPlan.executionArgs = {};
+          }
+        } else {
+          lastParsedPlan.executionArgs = {};
+        }
+      } else {
+        lastParsedPlan.executionArgs = {};
+      }
     }
 
     return lastParsedPlan;

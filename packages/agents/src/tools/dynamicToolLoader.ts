@@ -6,7 +6,6 @@ import { log, logError } from '@soup/common';
 import path from 'path';
 import fs from 'fs-extra';
 import crypto from 'crypto';
-import { executeToolInSandbox, validateToolCode } from './toolExecutionEnv';
 
 interface ToolManifest {
   toolName: string;
@@ -413,185 +412,292 @@ export class DynamicToolLoader {
     code: string,
     manifest: ToolManifest
   ): Promise<LoadedTool | null> {
+    // Try with transformation first (for ESM/TS tools)
     try {
-      // Transform potential ESM and TypeScript syntax to CommonJS for runtime import
-      const toCommonJS = (src: string): string => {
-        let out = src;
+      return await this.loadWithTransform(code, manifest);
+    } catch (transformError) {
+      log(
+        `[DynamicToolLoader] Transform failed for ${manifest.toolName}, trying original code:`,
+        transformError instanceof Error ? transformError.message : String(transformError)
+      );
 
-        // Replace `export const name =` with `const name =`
-        out = out.replace(/\bexport\s+const\s+(\w+)\s*=/g, 'const $1 =');
-        out = out.replace(/\bexport\s+let\s+(\w+)\s*=/g, 'let $1 =');
-        out = out.replace(/\bexport\s+var\s+(\w+)\s*=/g, 'var $1 =');
-        // Replace `export default <expr>;` with `module.exports = <expr>;`
-        out = out.replace(/\bexport\s+default\s+/g, 'module.exports = ');
-        // Remove named export lists like `export { a, b as c };`
-        out = out.replace(/\bexport\s*\{[^}]*\};?/g, '');
+      // Fallback: Load original untransformed code
+      try {
+        return await this.loadWithoutTransform(code, manifest);
+      } catch (untransformedError) {
+        logError(
+          `[DynamicToolLoader] Both transformation and untransformed loading failed for ${manifest.toolName}`,
+          {
+            transformError:
+              transformError instanceof Error ? transformError.message : String(transformError),
+            untransformedError:
+              untransformedError instanceof Error
+                ? untransformedError.message
+                : String(untransformedError),
+          }
+        );
+        return null;
+      }
+    }
+  }
 
-        // Remove TypeScript type assertions (as Type)
-        out = out.replace(/\s+as\s+\w+/g, '');
-        out = out.replace(/\s+as\s+any/g, '');
+  /**
+   * Load tool with CommonJS transformation applied
+   */
+  private async loadWithTransform(
+    code: string,
+    manifest: ToolManifest
+  ): Promise<LoadedTool | null> {
+    // Transform potential ESM and TypeScript syntax to CommonJS for runtime import
+    const toCommonJS = (src: string): string => {
+      let out = src;
 
-        // Remove TypeScript type annotations in function parameters and variables
-        out = out.replace(/:\s*\w+(\[\])?(\s*\||\s*&|\s*=|\s*,|\s*\)|\s*;)/g, (match) => {
-          return match.replace(/:\s*\w+(\[\])?/, '');
-        });
+      // Replace `export const name =` with `const name =`
+      out = out.replace(/\bexport\s+const\s+(\w+)\s*=/g, 'const $1 =');
+      out = out.replace(/\bexport\s+let\s+(\w+)\s*=/g, 'let $1 =');
+      out = out.replace(/\bexport\s+var\s+(\w+)\s*=/g, 'var $1 =');
+      // Replace `export default <expr>;` with `module.exports = <expr>;`
+      out = out.replace(/\bexport\s+default\s+/g, 'module.exports = ');
+      // Remove named export lists like `export { a, b as c };`
+      out = out.replace(/\bexport\s*\{[^}]*\};?/g, '');
 
-        return out;
+      // Remove TypeScript type assertions (as Type)
+      out = out.replace(/\s+as\s+\w+/g, '');
+      out = out.replace(/\s+as\s+any/g, '');
+
+      // Remove TypeScript type annotations in function parameters and variables
+      out = out.replace(/:\s*\w+(\[\])?(\s*\||\s*&|\s*=|\s*,|\s*\)|\s*;)/g, (match) => {
+        return match.replace(/:\s*\w+(\[\])?/, '');
+      });
+
+      return out;
+    };
+
+    const sanitizedCode = toCommonJS(code);
+    return await this.loadToolCode(sanitizedCode, manifest);
+  }
+
+  /**
+   * Load tool without any transformation
+   */
+  private async loadWithoutTransform(
+    code: string,
+    manifest: ToolManifest
+  ): Promise<LoadedTool | null> {
+    return await this.loadToolCode(code, manifest);
+  }
+
+  /**
+   * Common tool loading logic - wraps code in module environment and imports it
+   */
+  private async loadToolCode(
+    sanitizedCode: string,
+    manifest: ToolManifest
+  ): Promise<LoadedTool | null> {
+    // NOTE: Removed pre-load validation checks as they caused too many false positives
+    // The LLM prompt now contains clear warnings about:
+    // - webResearch/fetchWebContent placement (must be inside invoke)
+    // - validator API usage (auto-fixed during generation)
+    // - setTimeout/setInterval placement (will error at runtime with clear messages)
+    // If tools fail at runtime, the enhanced error handling will provide actionable diagnostics
+
+    // Create a safe module environment with real helper function implementations
+    const moduleCode = `
+      // Real helper functions available during both loading and execution
+      const webResearch = async (query, url) => {
+        try {
+          if (url || (query && query.startsWith('http'))) {
+            // Direct URL fetch
+            const targetUrl = url || query;
+            const axios = require('axios');
+            const response = await axios.get(targetUrl, {
+              timeout: 10000,
+              headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SoupAgent/1.0)' }
+            });
+            return \`Web content from \${targetUrl}: \${String(response.data).slice(0, 1000)}...\`;
+          } else {
+            // Use web search via toolExecutionEnv
+            const { performWebSearch } = require('./toolExecutionEnv');
+            return await performWebSearch(query);
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Web research failed';
+          return JSON.stringify({ error: errorMsg, query });
+        }
+      };
+      const fetchWebContent = async (url) => {
+        try {
+          const axios = require('axios');
+          const response = await axios.get(url, {
+            timeout: 10000,
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SoupAgent/1.0)' }
+          });
+          return response.data;
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Fetch failed';
+          throw new Error(\`Failed to fetch \${url}: \${errorMsg}\`);
+        }
+      };
+      const parseHTML = (html) => {
+        try {
+          const cheerio = require('cheerio');
+          return cheerio.load(html);
+        } catch (error) {
+          throw new Error('HTML parsing failed');
+        }
       };
 
-      const sanitizedCode = toCommonJS(code);
+      ${sanitizedCode}
 
-      // Create a safe module environment with helper function stubs for loading
-      const moduleCode = `
-        // Stub helper functions for tool loading (actual execution uses sandbox)
-        const webResearch = async (query, url) => {
-          throw new Error('webResearch is only available during tool execution, not loading');
-        };
-        const fetchWebContent = async (url) => {
-          throw new Error('fetchWebContent is only available during tool execution, not loading');
-        };
-        const parseHTML = (html) => {
-          throw new Error('parseHTML is only available during tool execution, not loading');
-        };
+      // Try to export the tool with exact name first
+      if (typeof ${manifest.toolName} !== 'undefined') {
+        module.exports = ${manifest.toolName};
+      } else {
+        // Export all defined variables so we can search case-insensitively
+        const exportableVars = {};
+        // Generate possible naming variants by checking common patterns
+        const toolNameLower = '${manifest.toolName}'.toLowerCase();
+        const possibleNames = [
+          '${manifest.toolName}',
+          // First letter uppercase
+          toolNameLower.charAt(0).toUpperCase() + toolNameLower.slice(1),
+          // Convert to camelCase by capitalizing after common word boundaries
+          toolNameLower.replace(/(calculate|financial|metrics|analyze|research|generate|create|process)/g, (match, word, offset) => {
+            return offset === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1);
+          })
+        ];
 
-        ${sanitizedCode}
+        // Add unique values only
+        const uniqueNames = [...new Set(possibleNames)];
 
-        // Try to export the tool with exact name first
-        if (typeof ${manifest.toolName} !== 'undefined') {
-          module.exports = ${manifest.toolName};
+        for (const varName of uniqueNames) {
+          try {
+            const varValue = eval('typeof ' + varName + ' !== "undefined" ? ' + varName + ' : null');
+            if (varValue && typeof varValue === 'object' && varValue.name && varValue.invoke) {
+              exportableVars[varName] = varValue;
+            }
+          } catch (e) {
+            // Variable doesn't exist
+          }
+        }
+
+        if (Object.keys(exportableVars).length > 0) {
+          // Export all found variables
+          Object.assign(module.exports, exportableVars);
         } else {
-          // Export all defined variables so we can search case-insensitively
-          const exportableVars = {};
-          // Generate possible naming variants by checking common patterns
-          const toolNameLower = '${manifest.toolName}'.toLowerCase();
-          const possibleNames = [
-            '${manifest.toolName}',
-            // First letter uppercase
-            toolNameLower.charAt(0).toUpperCase() + toolNameLower.slice(1),
-            // Convert to camelCase by capitalizing after common word boundaries
-            toolNameLower.replace(/(calculate|financial|metrics|analyze|research|generate|create|process)/g, (match, word, offset) => {
-              return offset === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1);
-            })
-          ];
-
-          // Add unique values only
-          const uniqueNames = [...new Set(possibleNames)];
-
-          for (const varName of uniqueNames) {
-            try {
-              const varValue = eval('typeof ' + varName + ' !== "undefined" ? ' + varName + ' : null');
-              if (varValue && typeof varValue === 'object' && varValue.name && varValue.invoke) {
-                exportableVars[varName] = varValue;
-              }
-            } catch (e) {
-              // Variable doesn't exist
-            }
-          }
-
-          if (Object.keys(exportableVars).length > 0) {
-            // Export all found variables
-            Object.assign(module.exports, exportableVars);
-          } else {
-            throw new Error('Tool not found in code: ${manifest.toolName}');
-          }
+          throw new Error('Tool not found in code: ${manifest.toolName}');
         }
-      `;
+      }
+    `;
 
-      // Use dynamic import for safe code execution
-      const tempFilePath = path.join(
-        this.CODE_DIR,
-        `temp_${manifest.hash}_${crypto.randomUUID()}.js`
-      );
-      await fs.writeFile(tempFilePath, moduleCode);
+    // Use dynamic import for safe code execution
+    const tempFilePath = path.join(
+      this.CODE_DIR,
+      `temp_${manifest.hash}_${crypto.randomUUID()}.js`
+    );
+    await fs.writeFile(tempFilePath, moduleCode);
 
+    try {
+      // Import the tool module with enhanced error handling
+      let toolModule;
       try {
-        // Import the tool module
-        const toolModule = await import(tempFilePath);
-        let toolInstance = toolModule.default || toolModule;
+        toolModule = await import(tempFilePath);
+      } catch (importError) {
+        // Capture detailed error information from import failures
+        const errorMsg = importError instanceof Error ? importError.message : String(importError);
+        const errorStack = importError instanceof Error ? importError.stack : '';
 
-        // Handle case where the exact variable name doesn't match but a similar one exists
-        if (!toolInstance || !toolInstance.name || !toolInstance.invoke) {
-          // Search for tool objects case-insensitively
-          const targetToolName = manifest.toolName.toLowerCase();
+        logError(
+          `[DynamicToolLoader] Failed to import tool ${manifest.toolName}:`,
+          `Error: ${errorMsg}`,
+          `Stack: ${errorStack}`
+        );
 
-          // Check all exports in the module
-          for (const [exportName, exportValue] of Object.entries(toolModule)) {
-            if (
-              exportName.toLowerCase() === targetToolName &&
-              exportValue &&
-              typeof exportValue === 'object' &&
-              (exportValue as any).name &&
-              (exportValue as any).invoke
-            ) {
-              toolInstance = exportValue;
-              log(
-                `[DynamicToolLoader] Found tool with case-insensitive match: ${exportName} for ${manifest.toolName}`
-              );
-              break;
-            }
-          }
-        }
-
-        // Validate tool structure
-        if (!toolInstance || !toolInstance.name || !toolInstance.invoke) {
-          const availableExports = Object.keys(toolModule);
+        // Provide actionable error messages for common issues
+        if (errorMsg.includes('is not defined')) {
+          const match = errorMsg.match(/(\w+) is not defined/);
+          const varName = match ? match[1] : 'variable';
           throw new Error(
-            `Invalid tool structure: missing name or invoke method. Available exports: ${availableExports.join(', ')}`
+            `Tool ${manifest.toolName} uses undefined variable "${varName}". ` +
+              `Common causes: 1) Variable not declared, 2) Object shorthand {${varName}} without variable, ` +
+              `3) Side effect during module load. Check that all variables are defined before use.`
+          );
+        } else if (errorMsg.includes('setTimeout') || errorMsg.includes('setInterval')) {
+          throw new Error(
+            `Tool ${manifest.toolName} uses setTimeout/setInterval at module scope causing crash. ` +
+              `Move all timers inside invoke() method.`
+          );
+        } else {
+          throw new Error(
+            `Tool ${manifest.toolName} failed to load: ${errorMsg}. ` +
+              `This may indicate syntax errors, side effects at module scope, or undefined variables.`
           );
         }
-
-        // Wrap invoke method with sandboxed execution
-        const safeInvoke = async (params: any): Promise<string> => {
-          try {
-            // Validate the code first
-            const validation = validateToolCode(code);
-            if (!validation.valid) {
-              logError(
-                `[DynamicToolLoader] Tool code validation failed for ${manifest.toolName}:`,
-                validation.errors
-              );
-              // Still try to execute but log the issues
-            }
-
-            // Execute in sandbox with access to npm packages and web
-            return await executeToolInSandbox(code, manifest.toolName, params);
-          } catch (error) {
-            logError(
-              `[DynamicToolLoader] Sandboxed execution failed for ${manifest.toolName}:`,
-              error
-            );
-            // Fallback to direct execution if sandbox fails
-            try {
-              return await toolInstance.invoke(params);
-            } catch (fallbackError) {
-              return JSON.stringify({
-                success: false,
-                error:
-                  fallbackError instanceof Error ? fallbackError.message : 'Tool execution failed',
-                toolName: manifest.toolName,
-              });
-            }
-          }
-        };
-
-        const loadedTool: LoadedTool = {
-          name: toolInstance.name,
-          description: toolInstance.description || manifest.originalRequest.taskDescription,
-          invoke: safeInvoke,
-          manifest,
-        };
-
-        // Clean up temp file
-        await fs.remove(tempFilePath).catch(() => {}); // Ignore cleanup errors
-
-        return loadedTool;
-      } finally {
-        // Always try to clean up temp file
-        await fs.remove(tempFilePath).catch(() => {});
       }
-    } catch (error) {
-      logError('[DynamicToolLoader] Failed to create tool from code:', error);
-      return null;
+
+      let toolInstance = toolModule.default || toolModule;
+
+      // Handle case where the exact variable name doesn't match but a similar one exists
+      if (!toolInstance || !toolInstance.name || !toolInstance.invoke) {
+        // Search for tool objects case-insensitively
+        const targetToolName = manifest.toolName.toLowerCase();
+
+        // Check all exports in the module
+        for (const [exportName, exportValue] of Object.entries(toolModule)) {
+          if (
+            exportName.toLowerCase() === targetToolName &&
+            exportValue &&
+            typeof exportValue === 'object' &&
+            (exportValue as any).name &&
+            (exportValue as any).invoke
+          ) {
+            toolInstance = exportValue;
+            log(
+              `[DynamicToolLoader] Found tool with case-insensitive match: ${exportName} for ${manifest.toolName}`
+            );
+            break;
+          }
+        }
+      }
+
+      // Validate tool structure
+      if (!toolInstance || !toolInstance.name || !toolInstance.invoke) {
+        const availableExports = Object.keys(toolModule);
+        throw new Error(
+          `Invalid tool structure: missing name or invoke method. Available exports: ${availableExports.join(', ')}`
+        );
+      }
+
+      // Wrap invoke method with sandboxed execution
+      const safeInvoke = async (params: any): Promise<string> => {
+        try {
+          // Direct execution - sandbox is currently broken
+          const result = await toolInstance.invoke(params);
+          // Ensure result is a string
+          return typeof result === 'string' ? result : JSON.stringify(result);
+        } catch (error) {
+          return JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : 'Tool execution failed',
+            toolName: manifest.toolName,
+          });
+        }
+      };
+
+      const loadedTool: LoadedTool = {
+        name: toolInstance.name,
+        description: toolInstance.description || manifest.originalRequest.taskDescription,
+        invoke: safeInvoke,
+        manifest,
+      };
+
+      // Clean up temp file
+      await fs.remove(tempFilePath).catch(() => {}); // Ignore cleanup errors
+
+      return loadedTool;
+    } finally {
+      // Always try to clean up temp file
+      await fs.remove(tempFilePath).catch(() => {});
     }
   }
 

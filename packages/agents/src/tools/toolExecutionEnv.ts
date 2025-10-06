@@ -19,6 +19,7 @@ const ALLOWED_PACKAGES = [
   'uuid',
   'numeral',
   'moment',
+  'moment-timezone',
   'validator',
   'crypto-js',
   'jsonpath',
@@ -29,6 +30,13 @@ const ALLOWED_PACKAGES = [
   'dompurify',
   'jsdom',
   'pdf-lib',
+  'xlsx',
+  // Additional commonly requested packages
+  'googleapis',
+  '@google-cloud/storage',
+  'stripe',
+  'nodemailer',
+  'dayjs',
 ];
 
 // Path to the blocked packages log file
@@ -345,6 +353,18 @@ export async function executeToolInSandbox(
               throw new Error('Tool ${toolName} not found or does not have invoke method');
             }
           } catch (error) {
+            // Improve error messages for common issues
+            if (error.message && error.message.includes('is not defined')) {
+              const match = error.message.match(/([a-zA-Z0-9_]+) is not defined/);
+              if (match) {
+                const varName = match[1];
+                // Check if it's a common package that should be required
+                const commonPackages = ['validator', 'lodash', 'moment', 'axios', 'cheerio', '_'];
+                if (commonPackages.includes(varName)) {
+                  throw new Error(\`\${varName} is not defined. Add "const \${varName === '_' ? '_ = require(\\'lodash\\')' : varName + ' = require(\\'' + varName + '\\')'};" at the top of your tool code.\`);
+                }
+              }
+            }
             throw error;
           }
         })();
