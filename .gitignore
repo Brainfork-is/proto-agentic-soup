@@ -19,6 +19,8 @@ apps/**/src/**/*.js
 packages/**/src/**/*.js
 apps/**/src/**/*.js.map
 packages/**/src/**/*.js.map
+apps/**/src/**/*.d.ts
+packages/**/src/**/*.d.ts
 
 # Coverage / testing
 coverage/
@@ -39,6 +41,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+.claude/
 
 # Databases / local state
 *.sqlite
@@ -47,6 +50,13 @@ Thumbs.db
 
 # Run outputs and metrics
 apps/soup-runner/runs/
+apps/soup-runner/backups/
+apps/soup-runner/logs/
+apps/soup-runner/*.csv
+apps/soup-runner/*.xlsx
+apps/soup-runner/dump.rdb
+*jobs-export*.csv
+soup-run-results.csv
 
 # Logs & temp
 logs/
@@ -58,3 +68,6 @@ temp/
 
 # Secrets Folder
 secrets
+
+# Local backup source snapshots
+*.bak

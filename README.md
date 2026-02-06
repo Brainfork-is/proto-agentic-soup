@@ -1,112 +1,86 @@
-# Agentic Soup — MVP with Web Browsing
+# Agentic Soup
 
-Agentic Soup is a single‑machine experiment to observe basic “survival of the fittest” dynamics among software agents competing for work. It runs a small market of deterministic jobs, a pool of agents with minimal tools, and a browser gateway over a tiny local website — all in TypeScript/Node on your machine.
+Agentic Soup is a TypeScript monorepo for experimenting with autonomous agent orchestration,
+job generation, grading, and tool-building workflows.
 
-Why: Cheap/fast agent creation + open inter‑agent communication + selection pressure (costs/rewards) should lead to a few high‑fitness “super‑agents” capturing most throughput. This repo provides the substrate to test early signals of that behavior.
+This repository currently ships one runnable app (`soup-runner`) plus shared libraries in
+`packages/`.
 
-Core stack: Fastify services, Redis (BullMQ queues), SQLite (Prisma), Playwright, TypeScript monorepo (pnpm).
-Agent runtime: We are adopting LangChain.js Tools and LangGraph.js to model the agent loop as a small graph (plan → act → reflect → learn). The current `SimpleAgent` heuristic is a stopgap to enable local runs without LLM keys.
+## What Is In This Repo
 
-## Architecture
+- `apps/soup-runner`: Fastify + BullMQ runner that orchestrates jobs/agents and exposes system APIs.
+- `packages/agents`: Agent implementations, LLM provider adapters, tool builders, and memory services.
+- `packages/common`: Shared config loading, logging, metrics, and common types.
+- `packages/mcp-servers/tool-examples`: Example MCP server package.
+- `docs/`: Specifications, plans, and contributor-facing documentation.
 
-```text
-                           ┌───────────────────────────┐
-                           │        site-kb (3200)     │
-                           │  Fastify static website   │
-                           │  / (RAG guides, docs)     │
-                           └──────────────┬────────────┘
-                                          │ (browse)
-                              HTTP        │
-                                          ▼
-┌──────────────────────────────┐    ┌──────────────────────────────┐
-│  soup-runner (3000)          │    │  browser-gateway (3100)      │
-│  Fastify API + Orchestrator  │    │  Fastify + Playwright        │
-│  - Job generator (BullMQ)    │◀──▶│  - /run: click/type/wait     │
-│  - Auto-graders + bank       │    │  - /healthz                  │
-│  - /healthz, /leaderboard    │    └──────────────────────────────┘
-│                              │
-│  Agents (workers)            │   ┌────────────────────────────────┐
-│  - SimpleAgent (temp)        │   │   Redis (6379)                 │
-│  - Tools: browser, stringKit │◀──┤   BullMQ queues (jobs)         │
-│           calc, retrieval    │   └────────────────────────────────┘
-│  - Target: LangGraph.js      │
-│                              │
-│  State: Prisma + SQLite      │
-└──────────────┬───────────────┘
-               │
-               ▼
-        SQLite dev.db (Prisma)
+## Requirements
+
+- Node `20.x` (see `.nvmrc` and `package.json#engines`)
+- pnpm `9.x`
+- Redis on `localhost:6379` for full runner mode
+
+## Quick Start
+
+```bash
+nvm use
+corepack enable && corepack prepare pnpm@9.0.0 --activate
+pnpm i
 ```
 
-Default ports
+Create a local `.env` from `.env.example` and set any provider-specific values you need.
 
-- soup-runner: `3000` (API: `/healthz`, `/leaderboard`)
-- browser-gateway: `3100` (API: `/healthz`, `/run`)
-- site-kb: `3200` (static pages agents browse)
-- Redis: `6379` (local service)
+### Run in dev mode
 
-Key behaviors
+```bash
+pnpm dev
+```
 
-- Job categories: `web_research`, `summarize`, `classify`, `math` (deterministic graders).
-- Costs/rewards: browser steps charged; payouts on success; penalties on failure.
-- Evolution hooks (MVP level): simple reproduction and culling at epoch boundaries.
+This starts `@soup/soup-runner` in watch mode and writes output to `soup-runner.log`.
 
-## Development
+### Run from build output
 
-- Monorepo managed by `pnpm` workspaces with apps in `apps/` and packages in `packages/`.
-- Use pnpm (not npm). If pnpm isn’t available, enable Corepack (Node 18+):
-  - `corepack enable && corepack prepare pnpm@9.0.0 --activate`
-- Install deps: `pnpm i`
-- Build all: `pnpm -r build`
-- Dev run: `pnpm dev`
+```bash
+pnpm build
+pnpm start
+```
 
-Notes:
+## Full Runner Setup (Redis + Prisma)
 
-- Node 20.x LTS is pinned for this repo. Use `nvm use` (reads `.nvmrc`), or Volta (auto-picks from `package.json#volta`). Newer majors (e.g., Node 23) may emit deprecation warnings and have ecosystem incompatibilities.
-- To run the full runner (not bootstrap), start a local Redis server and generate Prisma client:
-  - Start Redis on 6379 (e.g., `brew services start redis` or `pnpm redis:start`)
-  - `pnpm --filter @soup/soup-runner prisma:generate`
-  - Then run `pnpm --filter @soup/soup-runner dev` after unsetting `SOUP_BOOTSTRAP` or use `start` from dist.
+```bash
+pnpm redis:start
+pnpm prisma:generate
+pnpm prisma:migrate
+pnpm dev
+```
 
-## Quickstart
+If you only want a lightweight boot mode for health checks, set `SOUP_BOOTSTRAP=1` in your `.env`.
 
-1. Use Node 20 and pnpm
+## Common Commands
 
-- `nvm use` (or install Node 20.x)
-- `corepack enable && corepack prepare pnpm@9.0.0 --activate`
+- `pnpm dev`: Run `soup-runner` in watch mode.
+- `pnpm start`: Run built `soup-runner`.
+- `pnpm build`: Build all workspace packages/apps.
+- `pnpm lint`: Run ESLint across workspace.
+- `pnpm lint:fix`: Auto-fix lint issues.
+- `pnpm format`: Format source files with Prettier.
+- `pnpm format:check`: Verify formatting.
+- `pnpm test`: Workspace test hook (currently placeholder in packages).
 
-2. Install and run
+## Environment Notes
 
-- `pnpm i`
-- `pnpm dev`
-  - site-kb on 3200, browser-gateway on 3100
-  - soup-runner starts in bootstrap mode (health only) to avoid Redis/Prisma requirements on first run
+- Config is loaded via `dotenv` from project root `.env`.
+- Do not commit secrets; `.env` files are ignored and `.env.example` contains placeholders only.
+- Key runtime values are documented in `.env.example` and `packages/common/src/config.ts`.
 
-3. Full run (agents + jobs)
+## Contributing
 
-- Start Redis locally on 6379 (e.g., `brew services start redis` or `pnpm redis:start`)
-- `pnpm --filter @soup/soup-runner prisma:generate` (generate Prisma client for SQLite)
-- `pnpm --filter @soup/soup-runner dev` (ensure `SOUP_BOOTSTRAP` is not set)
+Before opening a PR:
 
-## Repo Layout
+```bash
+pnpm format:check
+pnpm lint
+pnpm -r build
+```
 
-- `apps/`
-  - `browser-gateway/`: Playwright HTTP API for deterministic browsing
-  - `site-kb/`: local knowledge-base website with static pages
-  - `soup-runner/`: orchestrator (jobs, graders, bank, metrics, agents)
-- `packages/`
-  - `common/`: shared types/util, metrics (Gini), seeds
-  - `agents/`: SimpleAgent (temporary) + tool adapters (`browserRun`, `stringKit`, `calc`, `retrieval`). Will be refactored to LangGraph.js + LangChain.js.
-- `infra/`: (legacy) Docker files; Redis is expected to run locally now
-- `docs/`: spec and tickets (`tech-spec.md`, `tickets.md`)
-
-## Code Style & Formatting
-
-- Prettier is required for formatting. Rules are defined in `.prettierrc.json` (2 spaces, semicolons, single quotes, width 100).
-- ESLint enforces TypeScript best practices and integrates with Prettier via `plugin:prettier/recommended`.
-- Before committing or opening a PR:
-  - Format: `pnpm format` (or check only: `pnpm format:check`)
-  - Lint: `pnpm lint` (auto-fix: `pnpm lint:fix`)
-  - Build: `pnpm -r build`
-
-See `docs/CONTRIBUTING.md` for full contributor guidelines.
+See `docs/CONTRIBUTING.md` for coding standards and workflow expectations.

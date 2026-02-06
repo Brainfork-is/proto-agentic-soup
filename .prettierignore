@@ -21,5 +21,6 @@ LICENSE
 *.config.js
 eslint.config.js
 .github/
+.claude/
 docs/
 *.prisma
