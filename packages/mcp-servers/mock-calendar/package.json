@@ -1,0 +1,22 @@
+{
+  "name": "@soup/mcp-mock-calendar",
+  "version": "0.1.0",
+  "description": "Mock Google Calendar MCP server for agent testing with realistic events",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mock-calendar-server": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "typescript": "^5.6.2"
+  }
+}
